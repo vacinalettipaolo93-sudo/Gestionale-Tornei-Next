@@ -1,6 +1,6 @@
 // App.tsx
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { type Event, type Tournament, type User, type Player, type SummerRankingData, type Match, type SummerRankingMasterMatch } from './types';
+import { type Event, type Tournament, type User, type Player, type SummerRankingData } from './types';
 import EventView from './components/EventView';
 import TournamentView from './components/TournamentView';
 import Login from './components/Login';
@@ -8,18 +8,23 @@ import EditProfileModal from './components/EditProfileModal';
 import ParticipantDashboard from './components/ParticipantDashboard';
 import ContactModal from './components/ContactModal';
 import SummerRankingView from './components/SummerRankingView';
+import PadelIndividualRankingView from './components/PadelIndividualRankingView';
 import AdminPlayersView from './components/AdminPlayersView';
 import AdminUsersModal from './components/AdminUsersModal';
 import { BackArrowIcon, NextTsBrandIcon, PencilIcon, PlusIcon, TrashIcon, UserCircleIcon, LogoutIcon } from './components/Icons';
 
 import { db } from "./firebase";
 import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, getDoc } from "firebase/firestore";
+import { calculateSummerRanking, normalizeRulesConfig } from './utils/summerRanking';
+import { calculatePadelIndividualRanking } from './utils/padelIndividualRanking';
 import {
-  DEFAULT_SUMMER_RANKING_RULES,
-  calculateSummerRanking,
-  generateRulesText,
-  normalizeRulesConfig,
-} from './utils/summerRanking';
+  createEmptyRankingData,
+  getEventType,
+  getRankingEventLabel,
+  isRankingEventType,
+  normalizeRankingData,
+  sanitizeRankingDataForFirestore,
+} from './utils/rankingEvent';
 import { isEventConcluded } from './utils/eventStatus';
 import { clearPersistedAuthSession, getAuthSessionStorage, persistAuthSession, resolvePersistedAuthUser } from './utils/authSession.js';
 
@@ -38,104 +43,7 @@ type TournamentTab =
   | 'players'
   | 'availability'; // <-- aggiunto
 
-const EMPTY_RANKING_DATA: SummerRankingData = {
-  slots: [],
-  matches: [],
-  participantIds: [],
-  rules: DEFAULT_SUMMER_RANKING_RULES,
-  availabilities: {},
-};
-
-const getEventType = (event?: Partial<Event> | null): EventType =>
-  event?.eventType === 'ranking_singolare'
-    ? 'ranking_singolare'
-    : event?.eventType === 'tournament_padel'
-      ? 'tournament_padel'
-      : 'tournament_singolare';
-
-const normalizeRankingData = (data?: SummerRankingData | null): SummerRankingData => ({
-  slots: Array.isArray(data?.slots) ? data.slots : [],
-  matches: Array.isArray(data?.matches) ? data.matches : [],
-  participantIds: Array.isArray(data?.participantIds) ? data.participantIds : [],
-  rules: data?.rules ?? generateRulesText(normalizeRulesConfig(data?.rulesConfig)),
-  rulesConfig: data?.rulesConfig,
-  availabilities: data?.availabilities ?? {},
-  master: data?.master
-    ? {
-      format: data.master.format === 'groups' || (Array.isArray(data.master.groups) && data.master.groups.length > 0) ? 'groups' : 'bracket',
-      manualQualifiedPlayerIds: Array.isArray(data.master.manualQualifiedPlayerIds) ? data.master.manualQualifiedPlayerIds : undefined,
-      generatedQualifiedPlayerIds: Array.isArray(data.master.generatedQualifiedPlayerIds) ? data.master.generatedQualifiedPlayerIds : undefined,
-      bracket: data.master.bracket ?? undefined,
-      groups: Array.isArray(data.master.groups) ? data.master.groups : [],
-      matches: Array.isArray(data.master.matches) ? data.master.matches : [],
-      generatedAt: data.master.generatedAt,
-    }
-    : undefined,
-});
-
-// Strips undefined optional fields from a Match so Firebase SDK v12 does not reject them in updateDoc
-const sanitizeMatch = (match: Match): Match => {
-  const result: Match = {
-    id: match.id,
-    player1Id: match.player1Id,
-    player2Id: match.player2Id,
-    score1: match.score1,
-    score2: match.score2,
-    status: match.status,
-  };
-  if (match.scheduledTime !== undefined) result.scheduledTime = match.scheduledTime;
-  if (match.location !== undefined) result.location = match.location;
-  if (match.field !== undefined) result.field = match.field;
-  if (match.slotId !== undefined) result.slotId = match.slotId;
-  if (match.completedAt !== undefined) result.completedAt = match.completedAt;
-  return result;
-};
-
-// Strips undefined optional fields from a SummerRankingMasterMatch
-const sanitizeMasterMatch = (match: SummerRankingMasterMatch): SummerRankingMasterMatch => {
-  const result: SummerRankingMasterMatch = {
-    id: match.id,
-    round: match.round,
-    label: match.label,
-    stage: match.stage,
-    player1Id: match.player1Id,
-    player2Id: match.player2Id,
-    score1: match.score1,
-    score2: match.score2,
-    status: match.status,
-  };
-  if (match.groupId !== undefined) result.groupId = match.groupId;
-  if (match.scheduledTime !== undefined) result.scheduledTime = match.scheduledTime;
-  if (match.location !== undefined) result.location = match.location;
-  if (match.field !== undefined) result.field = match.field;
-  if (match.slotId !== undefined) result.slotId = match.slotId;
-  if (match.completedAt !== undefined) result.completedAt = match.completedAt;
-  return result;
-};
-
-// Removes undefined values that Firebase SDK v12 rejects in updateDoc
-const sanitizeRankingDataForFirestore = (data: SummerRankingData): SummerRankingData => {
-  const payload: SummerRankingData = {
-    slots: Array.isArray(data.slots) ? data.slots : [],
-    matches: Array.isArray(data.matches) ? data.matches.map(sanitizeMatch) : [],
-    participantIds: Array.isArray(data.participantIds) ? Array.from(new Set(data.participantIds)) : [],
-    rules: data.rules ?? generateRulesText(normalizeRulesConfig(data.rulesConfig)),
-    availabilities: data.availabilities ?? {},
-  };
-  if (data.rulesConfig) payload.rulesConfig = data.rulesConfig;
-  if (data.master) {
-    const nextMaster: NonNullable<SummerRankingData['master']> = {};
-    nextMaster.format = data.master.format === 'groups' ? 'groups' : 'bracket';
-    if (Array.isArray(data.master.manualQualifiedPlayerIds)) nextMaster.manualQualifiedPlayerIds = data.master.manualQualifiedPlayerIds;
-    if (Array.isArray(data.master.generatedQualifiedPlayerIds)) nextMaster.generatedQualifiedPlayerIds = data.master.generatedQualifiedPlayerIds;
-    if (data.master.bracket !== undefined) nextMaster.bracket = data.master.bracket;
-    if (Array.isArray(data.master.groups)) nextMaster.groups = data.master.groups;
-    if (Array.isArray(data.master.matches)) nextMaster.matches = data.master.matches.map(sanitizeMasterMatch);
-    if (data.master.generatedAt !== undefined) nextMaster.generatedAt = data.master.generatedAt;
-    payload.master = nextMaster;
-  }
-  return payload;
-};
+const EMPTY_RANKING_DATA: SummerRankingData = createEmptyRankingData('ranking_singolare');
 
 const App: React.FC = () => {
   const [events, setEvents] = useState<Event[]>([]);
@@ -180,9 +88,10 @@ const App: React.FC = () => {
 
   const getEventRankingData = (event?: Event | null) => {
     const eventType = getEventType(event);
-    if (eventType !== 'ranking_singolare') return EMPTY_RANKING_DATA;
-    if (event?.rankingData) return normalizeRankingData(event.rankingData);
-    return normalizeRankingData(legacySummerRanking);
+    if (!isRankingEventType(eventType)) return EMPTY_RANKING_DATA;
+    if (event?.rankingData) return normalizeRankingData(event.rankingData, eventType);
+    if (eventType === 'ranking_singolare') return normalizeRankingData(legacySummerRanking, eventType);
+    return createEmptyRankingData(eventType);
   };
 
   useEffect(() => {
@@ -199,7 +108,7 @@ const App: React.FC = () => {
           globalTimeSlots: Array.isArray(raw.globalTimeSlots) ? raw.globalTimeSlots : [],
           rules: raw.rules,
           eventType,
-          rankingData: eventType === 'ranking_singolare' ? normalizeRankingData(raw.rankingData) : undefined,
+          rankingData: isRankingEventType(eventType) ? normalizeRankingData(raw.rankingData, eventType) : undefined,
         } as Event;
       });
       setEvents(nextEvents);
@@ -224,7 +133,7 @@ const App: React.FC = () => {
       .then(snapshot => {
         if (!snapshot.exists()) return;
         const data = snapshot.data() as SummerRankingData | undefined;
-        setLegacySummerRanking(normalizeRankingData(data));
+        setLegacySummerRanking(normalizeRankingData(data, 'ranking_singolare'));
       })
       .catch(error => {
         console.error('Errore lettura fallback Summer Ranking Next', error);
@@ -297,19 +206,19 @@ const App: React.FC = () => {
     }
   };
 
-  const saveEventRankingData = async (eventId: string, nextData: SummerRankingData) => {
-    const normalized = normalizeRankingData(nextData);
+  const saveEventRankingData = async (eventId: string, eventType: EventType, nextData: SummerRankingData) => {
+    const normalized = normalizeRankingData(nextData, eventType);
     setEvents(prevEvents => prevEvents.map(event =>
       event.id === eventId
-        ? { ...event, eventType: 'ranking_singolare', rankingData: normalized }
+        ? { ...event, eventType, rankingData: normalized }
         : event
     ));
     if (selectedEvent?.id === eventId) {
-      setSelectedEvent(prev => prev ? { ...prev, eventType: 'ranking_singolare', rankingData: normalized } : prev);
+      setSelectedEvent(prev => prev ? { ...prev, eventType, rankingData: normalized } : prev);
     }
-    const sanitized = sanitizeRankingDataForFirestore(normalized);
+    const sanitized = sanitizeRankingDataForFirestore(normalized, eventType);
     await updateDoc(doc(db, "events", eventId), {
-      eventType: 'ranking_singolare',
+      eventType,
       rankingData: sanitized,
     });
   };
@@ -374,6 +283,7 @@ const App: React.FC = () => {
 
     if (
       newEventType !== 'ranking_singolare'
+      && newEventType !== 'ranking_padel_individuale'
       && newEventType !== 'tournament_singolare'
       && newEventType !== 'tournament_padel'
     ) {
@@ -392,10 +302,10 @@ const App: React.FC = () => {
     };
 
     try {
-      await addDoc(collection(db, "events"), newEventType === 'ranking_singolare'
+      await addDoc(collection(db, "events"), isRankingEventType(newEventType)
         ? {
           ...baseEvent,
-          rankingData: { ...EMPTY_RANKING_DATA },
+          rankingData: createEmptyRankingData(newEventType),
         }
         : baseEvent);
       closeCreateModal();
@@ -545,17 +455,26 @@ const App: React.FC = () => {
                     {ongoingEvents.map(event => {
                       const eventType = getEventType(event);
                       const rankingData = getEventRankingData(event);
-                      const rankingTop8 = eventType === 'ranking_singolare'
-                        ? calculateSummerRanking(
-                          (event.players ?? []).filter(
-                            player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
-                          ),
-                          rankingData.matches ?? [],
-                          normalizeRulesConfig(rankingData.rulesConfig),
+                      const rankingTop8 = isRankingEventType(eventType)
+                        ? (
+                          eventType === 'ranking_padel_individuale'
+                            ? calculatePadelIndividualRanking(
+                              (event.players ?? []).filter(
+                                player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
+                              ),
+                              rankingData.matches ?? [],
+                            )
+                            : calculateSummerRanking(
+                              (event.players ?? []).filter(
+                                player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
+                              ),
+                              rankingData.matches ?? [],
+                              normalizeRulesConfig(rankingData.rulesConfig),
+                            )
                         ).slice(0, 8)
                         : [];
                       const { totalMatches, completedMatches, completionPercentage } = (() => {
-                        if (eventType === 'ranking_singolare') {
+                        if (isRankingEventType(eventType)) {
                           const total = rankingData.matches.length;
                           const completed = rankingData.matches.filter(match => match.status === 'completed').length;
                           return {
@@ -585,13 +504,13 @@ const App: React.FC = () => {
                           <div onClick={() => handleSelectEvent(event)} className="p-6 cursor-pointer flex-grow z-10">
                             <h3 className="text-xl font-bold text-accent truncate">{event.name}</h3>
                             <p className="text-text-secondary mt-2 text-sm">
-                              {eventType === 'ranking_singolare'
-                                ? `Ranking tennis singolare • ${(rankingData.participantIds ?? []).length} partecipanti`
+                              {isRankingEventType(eventType)
+                                ? `${getRankingEventLabel(eventType)} • ${(rankingData.participantIds ?? []).length} partecipanti`
                                 : eventType === 'tournament_padel'
                                   ? `${event.tournaments.length} tornei • ${event.tournaments.reduce((total, tournament) => total + (tournament.padelTeams?.length ?? 0), 0)} squadre`
                                   : `${event.tournaments.length} tornei • ${event.players.length} giocatori`}
                             </p>
-                            {eventType === 'ranking_singolare' ? (
+                            {isRankingEventType(eventType) ? (
                               <div className="mt-4 pt-4 border-t border-tertiary/50">
                                 <div className="flex justify-between items-center text-sm mb-2">
                                   <span className="text-text-secondary">Top 8 classifica</span>
@@ -665,17 +584,26 @@ const App: React.FC = () => {
                     {concludedEvents.map(event => {
                       const eventType = getEventType(event);
                       const rankingData = getEventRankingData(event);
-                      const rankingTop8 = eventType === 'ranking_singolare'
-                        ? calculateSummerRanking(
-                          (event.players ?? []).filter(
-                            player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
-                          ),
-                          rankingData.matches ?? [],
-                          normalizeRulesConfig(rankingData.rulesConfig),
+                      const rankingTop8 = isRankingEventType(eventType)
+                        ? (
+                          eventType === 'ranking_padel_individuale'
+                            ? calculatePadelIndividualRanking(
+                              (event.players ?? []).filter(
+                                player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
+                              ),
+                              rankingData.matches ?? [],
+                            )
+                            : calculateSummerRanking(
+                              (event.players ?? []).filter(
+                                player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
+                              ),
+                              rankingData.matches ?? [],
+                              normalizeRulesConfig(rankingData.rulesConfig),
+                            )
                         ).slice(0, 8)
                         : [];
                       const { totalMatches, completedMatches } = (() => {
-                        if (eventType === 'ranking_singolare') {
+                        if (isRankingEventType(eventType)) {
                           const total = rankingData.matches.length;
                           const completed = rankingData.matches.filter(match => match.status === 'completed').length;
                           return { totalMatches: total, completedMatches: completed };
@@ -702,13 +630,13 @@ const App: React.FC = () => {
                               </span>
                             </div>
                             <p className="text-text-secondary mt-1 text-sm">
-                              {eventType === 'ranking_singolare'
-                                ? `Ranking tennis singolare • ${(rankingData.participantIds ?? []).length} partecipanti`
+                              {isRankingEventType(eventType)
+                                ? `${getRankingEventLabel(eventType)} • ${(rankingData.participantIds ?? []).length} partecipanti`
                                 : eventType === 'tournament_padel'
                                   ? `${event.tournaments.length} tornei • ${event.tournaments.reduce((total, tournament) => total + (tournament.padelTeams?.length ?? 0), 0)} squadre`
                                   : `${event.tournaments.length} tornei • ${event.players.length} giocatori`}
                             </p>
-                            {eventType === 'ranking_singolare' ? (
+                            {isRankingEventType(eventType) ? (
                               <div className="mt-4 pt-4 border-t border-tertiary/50">
                                 <div className="flex justify-between items-center text-sm mb-2">
                                   <span className="text-text-secondary">Top 8 classifica</span>
@@ -780,11 +708,30 @@ const App: React.FC = () => {
               isOrganizer={isOrganizer}
               loggedInPlayerId={loggedInPlayerId}
               onPlayerContact={setContactPlayer}
-              onSaveRankingData={(nextData) => saveEventRankingData(currentEventState.id, nextData)}
+              onSaveRankingData={(nextData) => saveEventRankingData(currentEventState.id, 'ranking_singolare', nextData)}
               onUpdatePlayerStartPoints={updatePlayerSummerRankingStartPoints}
               onOpenPlayersAdmin={isOrganizer ? () => setCurrentView('playersAdmin') : undefined}
               title={`${currentEventState.name} • Ranking tennis singolare`}
               description="Classifica, partite, master finale, disponibilità e regolamento di questo evento."
+              playersAdminLabel="Apri gestione giocatori evento"
+            />
+          </div>
+        );
+      }
+
+      if (getEventType(currentEventState) === 'ranking_padel_individuale') {
+        const rankingData = getEventRankingData(currentEventState);
+        return (
+          <div className="animate-fadeIn">
+            <PadelIndividualRankingView
+              players={currentEventState.players ?? []}
+              rankingData={rankingData}
+              isOrganizer={isOrganizer}
+              loggedInPlayerId={loggedInPlayerId}
+              onSaveRankingData={(nextData) => saveEventRankingData(currentEventState.id, 'ranking_padel_individuale', nextData)}
+              onOpenPlayersAdmin={isOrganizer ? () => setCurrentView('playersAdmin') : undefined}
+              title={`${currentEventState.name} • Ranking padel individuale`}
+              description="Campionato individuale di padel con partner liberi, bonus, storico punti e Master finale."
               playersAdminLabel="Apri gestione giocatori evento"
             />
           </div>
@@ -825,7 +772,7 @@ const App: React.FC = () => {
       currentView === 'playersAdmin'
       && isOrganizer
       && currentEventState
-      && getEventType(currentEventState) === 'ranking_singolare'
+      && isRankingEventType(getEventType(currentEventState))
     ) {
       return (
         <AdminPlayersView
@@ -934,6 +881,7 @@ const App: React.FC = () => {
                   className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary focus:ring-2 focus:ring-accent focus:border-accent"
                 >
                   <option value="ranking_singolare">Ranking tennis singolare</option>
+                  <option value="ranking_padel_individuale">Ranking padel individuale</option>
                   <option value="tournament_singolare">Torneo tennis singolare</option>
                   <option value="tournament_padel">Torneo di padel</option>
                 </select>

@@ -2,6 +2,8 @@ import React from 'react';
 import { type Event } from '../types';
 import { calculateStandings } from '../utils/standings';
 import { calculateSummerRanking, normalizeRulesConfig } from '../utils/summerRanking';
+import { calculatePadelIndividualRanking } from '../utils/padelIndividualRanking';
+import { getRankingEventLabel, matchIncludesPlayer } from '../utils/rankingEvent';
 import { isEventConcluded } from '../utils/eventStatus';
 import { getTeamForPlayer, getTournamentCompetitors, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
 
@@ -25,22 +27,24 @@ const ParticipantDashboard: React.FC<ParticipantDashboardProps> = ({ events, hea
     let completionPercentage = 0;
     let tournamentName = '';
 
-    if (event.eventType === 'ranking_singolare') {
+    if (event.eventType === 'ranking_singolare' || event.eventType === 'ranking_padel_individuale') {
       const rankingData = event.rankingData;
       const participantIds = Array.isArray(rankingData?.participantIds) ? rankingData.participantIds : [];
       const isInRanking = participantIds.includes(playerId);
       const confirmedPlayers = Array.isArray(event.players)
         ? event.players.filter(player => player.status === 'confirmed' && participantIds.includes(player.id))
         : [];
-      const ranking = calculateSummerRanking(confirmedPlayers, Array.isArray(rankingData?.matches) ? rankingData.matches : [], normalizeRulesConfig(rankingData?.rulesConfig));
+      const ranking = event.eventType === 'ranking_padel_individuale'
+        ? calculatePadelIndividualRanking(confirmedPlayers, Array.isArray(rankingData?.matches) ? rankingData.matches : [])
+        : calculateSummerRanking(confirmedPlayers, Array.isArray(rankingData?.matches) ? rankingData.matches : [], normalizeRulesConfig(rankingData?.rulesConfig));
       const myRanking = ranking.find(entry => entry.player.id === playerId);
       position = isInRanking && myRanking ? `${myRanking.rank}°` : '—';
-      const myMatches = (rankingData?.matches ?? []).filter(match => match.player1Id === playerId || match.player2Id === playerId);
+      const myMatches = (rankingData?.matches ?? []).filter(match => matchIncludesPlayer(match, playerId));
       totalMatches = myMatches.length;
       played = myMatches.filter(match => match.status === 'completed').length;
       toPlay = totalMatches - played;
       completionPercentage = totalMatches > 0 ? Math.round((played / totalMatches) * 100) : 0;
-      tournamentName = 'Ranking tennis singolare';
+      tournamentName = getRankingEventLabel(event.eventType);
       return { position, played, toPlay, totalMatches, completionPercentage, tournamentName };
     }
 
@@ -105,7 +109,7 @@ const ParticipantDashboard: React.FC<ParticipantDashboardProps> = ({ events, hea
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {ongoing.map(event => {
                                     const stats = getPlayerStats(event);
-                                    const isRankingEvent = event.eventType === 'ranking_singolare';
+                                    const isRankingEvent = event.eventType === 'ranking_singolare' || event.eventType === 'ranking_padel_individuale';
                                     return (
                                         <div
                                             key={event.id}
