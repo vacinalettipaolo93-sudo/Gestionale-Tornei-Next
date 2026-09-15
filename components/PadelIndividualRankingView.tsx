@@ -527,7 +527,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-2xl sm:text-3xl font-bold text-accent">{title ?? PADEL_INDIVIDUAL_RANKING_NAME}</h2>
-            <p className="text-text-secondary mt-1">{description ?? 'Ranking padel individuale con partner liberi, bonus e Master finale.'}</p>
+            <p className="text-text-secondary mt-1">{description ?? 'Paitone Arena League con partner liberi, bonus e Master finale.'}</p>
           </div>
           <div className="text-sm text-text-secondary">
             {confirmedPlayers.length} partecipanti • {visibleMatches.length} partite registrate
