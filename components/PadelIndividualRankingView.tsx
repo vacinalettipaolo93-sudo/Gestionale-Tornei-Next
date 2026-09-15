@@ -1375,43 +1375,45 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
             )}
           </div>
 
-          <div className="bg-secondary rounded-xl shadow-lg p-5">
-            <div className="mb-4">
-              <h3 className="text-lg font-bold text-accent">Disponibilità partecipanti</h3>
-              <p className="text-sm text-text-secondary">Gli organizzatori possono consultare e gestire la disponibilità secondo il modello già usato nel ranking estivo.</p>
-            </div>
-            <div className="space-y-3">
-              {ranking.map(entry => {
-                const availabilitySummary = getAvailabilitySummary(rankingData.availabilities?.[entry.player.id]);
-                const normalizedEntries = normalizeAvailabilityEntries(rankingData.availabilities?.[entry.player.id]);
-                return (
-                  <div key={entry.player.id} className="rounded-xl border border-tertiary/40 bg-primary/30 p-4">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="font-semibold text-text-primary">{entry.player.name}</div>
-                        <div className="text-sm text-text-secondary">{availabilitySummary.status}</div>
+          {isOrganizer && (
+            <div className="bg-secondary rounded-xl shadow-lg p-5">
+              <div className="mb-4">
+                <h3 className="text-lg font-bold text-accent">Disponibilità partecipanti</h3>
+                <p className="text-sm text-text-secondary">Gli organizzatori possono consultare e gestire la disponibilità secondo il modello già usato nel ranking estivo.</p>
+              </div>
+              <div className="space-y-3">
+                {ranking.map(entry => {
+                  const availabilitySummary = getAvailabilitySummary(rankingData.availabilities?.[entry.player.id]);
+                  const normalizedEntries = normalizeAvailabilityEntries(rankingData.availabilities?.[entry.player.id]);
+                  return (
+                    <div key={entry.player.id} className="rounded-xl border border-tertiary/40 bg-primary/30 p-4">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="font-semibold text-text-primary">{entry.player.name}</div>
+                          <div className="text-sm text-text-secondary">{availabilitySummary.status}</div>
+                        </div>
+                        {availabilitySummary.details && (
+                          <div className="text-sm text-text-secondary">{availabilitySummary.details}</div>
+                        )}
                       </div>
-                      {availabilitySummary.details && (
-                        <div className="text-sm text-text-secondary">{availabilitySummary.details}</div>
+                      {normalizedEntries.length > 1 && (
+                        <div className="mt-3 space-y-2 text-xs text-text-secondary">
+                          {normalizedEntries.map(item => (
+                            <div key={item.id}>
+                              <span className="font-semibold text-text-primary">{item.status === 'available' ? 'Disponibile' : 'Non disponibile'}:</span>{' '}
+                              {formatAvailabilityDays(item.days)}
+                              {item.status === 'available' && item.periods?.length ? ` • ${formatAvailabilityPeriods(item.periods)}` : ''}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {isOrganizer && normalizedEntries.length > 1 && (
-                      <div className="mt-3 space-y-2 text-xs text-text-secondary">
-                        {normalizedEntries.map(item => (
-                          <div key={item.id}>
-                            <span className="font-semibold text-text-primary">{item.status === 'available' ? 'Disponibile' : 'Non disponibile'}:</span>{' '}
-                            {formatAvailabilityDays(item.days)}
-                            {item.status === 'available' && item.periods?.length ? ` • ${formatAvailabilityPeriods(item.periods)}` : ''}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {ranking.length === 0 && <div className="text-sm text-text-secondary">Nessun partecipante confermato nell’evento.</div>}
+                  );
+                })}
+                {ranking.length === 0 && <div className="text-sm text-text-secondary">Nessun partecipante confermato nell’evento.</div>}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

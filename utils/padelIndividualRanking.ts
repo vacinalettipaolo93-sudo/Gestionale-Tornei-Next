@@ -643,7 +643,10 @@ const createPadelIndividualMasterBracket = (pairIds: string[]): PlayoffBracket =
 };
 
 export const recomputePadelIndividualMasterBracket = (bracket: PlayoffBracket): PlayoffBracket => {
-  const nextBracket = JSON.parse(JSON.stringify(bracket)) as PlayoffBracket;
+  const nextBracket: PlayoffBracket = {
+    ...bracket,
+    matches: bracket.matches.map(match => ({ ...match })),
+  };
   const orderedMatches = nextBracket.matches.slice().sort((left, right) => left.round - right.round || left.matchIndex - right.matchIndex);
   const matchMap = new Map(orderedMatches.map(match => [match.id, match]));
 
