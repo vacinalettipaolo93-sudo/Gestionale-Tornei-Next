@@ -177,7 +177,7 @@ test('won-games bonus is capped at +5 per player and per match', () => {
 test('custom diff bands and points are consumed instead of hard-coded defaults', () => {
   const players = [createPlayer('a', 1100), createPlayer('b', 1050), createPlayer('c', 1000), createPlayer('d', 1000)];
   const config = normalizePadelIndividualRulesConfig({
-    diffBandLowMax: 149,
+    diffBandLowMax: 150,
     diffBandMediumMax: 249,
     favoriteWinLow: 12,
     favoriteLossLow: -12,
