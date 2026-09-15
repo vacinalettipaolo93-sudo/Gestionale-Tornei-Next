@@ -212,9 +212,39 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       .sort((left, right) => new Date(right.completedAt ?? right.scheduledTime ?? 0).getTime() - new Date(left.completedAt ?? left.scheduledTime ?? 0).getTime()),
     [rankingData.matches],
   );
+  const visibleMatchCards = useMemo(
+    () =>
+      visibleMatches.map(match => {
+        const breakdown = matchBreakdowns.get(match.id) ?? null;
+        const team1 = getPadelIndividualTeamPlayerIds(match, 1);
+        const team2 = getPadelIndividualTeamPlayerIds(match, 2);
+        const team1Name = getPairNameByIds(team1, playerMap);
+        const team2Name = getPairNameByIds(team2, playerMap);
+        const favoriteLabel = breakdown
+          ? breakdown.favoriteSide === null
+            ? 'Nessuna'
+            : breakdown.favoriteSide === 1
+              ? team1Name
+              : team2Name
+          : null;
+        return {
+          match,
+          breakdown,
+          team1Name,
+          team2Name,
+          favoriteLabel,
+        };
+      }),
+    [matchBreakdowns, playerMap, visibleMatches],
+  );
 
   const selectedMatchBreakdown = selectedMatchId ? matchBreakdowns.get(selectedMatchId) ?? null : null;
-  const canSubmitMatch = isOrganizer || (!!loggedInPlayerId && rankingParticipantIds.includes(loggedInPlayerId));
+  const selectedPlayerIds = [matchForm.team1Player1Id, matchForm.team1Player2Id, matchForm.team2Player1Id, matchForm.team2Player2Id];
+  const canSubmitMatch = isOrganizer || (
+    !!loggedInPlayerId
+    && rankingParticipantIds.includes(loggedInPlayerId)
+    && selectedPlayerIds.includes(loggedInPlayerId)
+  );
   const masterPairs = rankingData.padelIndividualMaster?.pairs ?? [];
   const masterPairMap = useMemo(
     () => new Map(masterPairs.map(pair => [pair.id, pair])),
@@ -716,15 +746,12 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
             </div>
 
             <div className="space-y-3">
-              {visibleMatches.map(match => {
-                const breakdown = matchBreakdowns.get(match.id);
-                const team1 = getPadelIndividualTeamPlayerIds(match, 1);
-                const team2 = getPadelIndividualTeamPlayerIds(match, 2);
+              {visibleMatchCards.map(({ match, breakdown, team1Name, team2Name, favoriteLabel }) => {
                 return (
                   <div key={match.id} className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 space-y-3">
                     <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
                       <div>
-                        <div className="font-semibold text-text-primary">{getPairNameByIds(team1, playerMap)} vs {getPairNameByIds(team2, playerMap)}</div>
+                        <div className="font-semibold text-text-primary">{team1Name} vs {team2Name}</div>
                         <div className="text-sm text-text-secondary mt-1">{formatDateTime(match.completedAt)}</div>
                         <div className="text-sm font-semibold text-accent mt-1">{match.score1} - {match.score2}</div>
                       </div>
@@ -743,7 +770,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                     {breakdown && (
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className={`inline-flex rounded-full border px-2.5 py-1 font-semibold ${getPadelIndividualBandTone(breakdown.band)}`}>{getPadelIndividualBandLabel(breakdown.band)}</span>
-                        <span className="inline-flex rounded-full border border-tertiary px-2.5 py-1 font-semibold text-text-primary">Favorita: {breakdown.favoriteSide === null ? 'Nessuna' : breakdown.favoriteSide === 1 ? getPairNameByIds(team1, playerMap) : getPairNameByIds(team2, playerMap)}</span>
+                        <span className="inline-flex rounded-full border border-tertiary px-2.5 py-1 font-semibold text-text-primary">Favorita: {favoriteLabel ?? 'Nessuna'}</span>
                       </div>
                     )}
                   </div>

@@ -46,7 +46,7 @@ const createPlayer = (id, start) => ({
   summerRankingStartPoints: start,
 });
 
-const createMatch = ({ id = 'match-1', team1, team2, score1, score2, completedAt, monthKey = completedAt.slice(0, 7) }) => ({
+const createMatch = ({ id = 'match-1', team1, team2, score1, score2, completedAt, monthKey = typeof completedAt === 'string' ? completedAt.slice(0, 7) : undefined }) => ({
   id,
   player1Id: team1[0],
   player2Id: team2[0],

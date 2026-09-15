@@ -241,7 +241,8 @@ export const getPadelIndividualPreMatchInfo = (
   };
 };
 
-const createRatingsMap = (players: Player[]) => new Map(players.map(player => [player.id, getStartingPoints(player)]));
+const createRatingsMap = (players: Player[]) =>
+  new Map<string, number>(players.map(player => [player.id, getStartingPoints(player)] as const));
 
 const buildMatchBreakdown = (
   match: Match,
@@ -540,7 +541,7 @@ export const getPadelIndividualFavoritePairText = (
   team2PlayerIds: string[],
   playerMap: Map<string, Player>,
 ) => {
-  if (!info) return 'Seleziona quattro giocatori registrati per calcolare fascia e favoritа.';
+  if (!info)   return 'Seleziona quattro giocatori registrati per calcolare fascia e favorita.';
   if (info.favoriteSide === null) return 'Nessuna coppia favorita';
   const ids = info.favoriteSide === 1 ? team1PlayerIds : team2PlayerIds;
   return ids.map(playerId => playerMap.get(playerId)?.name ?? playerId).join(' / ');
