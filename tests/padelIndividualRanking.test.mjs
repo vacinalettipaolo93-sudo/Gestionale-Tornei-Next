@@ -213,6 +213,21 @@ test('custom participation and won-games caps are applied deterministically', ()
   assert.equal(ranking.find(entry => entry.player.id === 'c').wonGamesBonus, 18);
 });
 
+test('custom participation cap never exceeds the configured monthly maximum', () => {
+  const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
+  const config = normalizePadelIndividualRulesConfig({
+    participationBase: 7,
+    participationMonthlyCap: 10,
+  });
+  const ranking = calculatePadelIndividualRanking(players, [
+    createMatch({ id: 'm1', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-03-01T10:00' }),
+    createMatch({ id: 'm2', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 3, completedAt: '2026-03-15T10:00' }),
+  ], config);
+
+  assert.equal(ranking.find(entry => entry.player.id === 'a').participationBonus, 10);
+  assert.equal(ranking.find(entry => entry.player.id === 'c').participationBonus, 10);
+});
+
 test('editing and re-saving a result recalculates from history without duplicating derived points', () => {
   const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
   const original = calculatePadelIndividualRanking(players, [

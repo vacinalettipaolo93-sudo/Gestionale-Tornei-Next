@@ -276,10 +276,12 @@ const getParticipantBonus = (
   if (!cfg.participationBonusEnabled || cfg.participationBase === 0) return 0;
   const monthKey = `${playerId}:${getMonthKey(match)}`;
   const currentCount = monthlyCounts.get(monthKey) ?? 0;
+  const currentTotal = currentCount * cfg.participationBase;
   monthlyCounts.set(monthKey, currentCount + 1);
-  return cfg.participationMonthlyCap > 0 && currentCount * cfg.participationBase >= cfg.participationMonthlyCap
-    ? 0
-    : cfg.participationBase;
+  if (cfg.participationMonthlyCap <= 0) return cfg.participationBase;
+  const remainingAllowance = cfg.participationMonthlyCap - currentTotal;
+  if (remainingAllowance <= 0) return 0;
+  return Math.min(cfg.participationBase, remainingAllowance);
 };
 
 export const getPadelIndividualPreMatchInfo = (

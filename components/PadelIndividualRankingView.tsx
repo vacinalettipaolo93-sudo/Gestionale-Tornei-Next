@@ -1355,6 +1355,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
 
                 {availabilityForm.entries.length > 0 && (
                   <button
+                    aria-label="Elimina tutte le disponibilità dichiarate del tuo profilo"
                     onClick={handleClearAvailabilityEntries}
                     disabled={isSavingAvailability}
                     className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
