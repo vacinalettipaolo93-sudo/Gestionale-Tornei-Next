@@ -35,6 +35,7 @@ const {
   calculatePadelIndividualMatchBreakdowns,
   calculatePadelIndividualRanking,
   getPadelIndividualAutoQualifiedPlayerIds,
+  normalizePadelIndividualRulesConfig,
 } = await import(padelModuleUrl);
 
 const createPlayer = (id, start) => ({
@@ -173,6 +174,44 @@ test('won-games bonus is capped at +5 per player and per match', () => {
   assert.equal(ranking.find(entry => entry.player.id === 'c').wonGamesBonus, 5);
 });
 
+test('custom diff bands and points are consumed instead of hard-coded defaults', () => {
+  const players = [createPlayer('a', 1100), createPlayer('b', 1050), createPlayer('c', 1000), createPlayer('d', 1000)];
+  const config = normalizePadelIndividualRulesConfig({
+    diffBandLowMax: 149,
+    diffBandMediumMax: 249,
+    favoriteWinLow: 12,
+    favoriteLossLow: -12,
+    underdogWinLow: 18,
+    underdogLossLow: -8,
+  });
+  const breakdown = calculatePadelIndividualMatchBreakdowns(players, [
+    createMatch({ team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-03-11T10:00' }),
+  ], config).get('match-1');
+
+  assert.equal(breakdown.band, 'balanced');
+  assert.equal(getPlayerBreakdown(breakdown, 'a').resultPoints, 12);
+  assert.equal(getPlayerBreakdown(breakdown, 'c').resultPoints, -8);
+});
+
+test('custom participation and won-games caps are applied deterministically', () => {
+  const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
+  const config = normalizePadelIndividualRulesConfig({
+    participationBase: 7,
+    participationMonthlyCap: 14,
+    wonGamesMultiplier: 2,
+    wonGamesCap: 8,
+  });
+  const ranking = calculatePadelIndividualRanking(players, [
+    createMatch({ id: 'm1', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-03-01T10:00' }),
+    createMatch({ id: 'm2', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 3, completedAt: '2026-03-15T10:00' }),
+    createMatch({ id: 'm3', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 2, completedAt: '2026-03-25T10:00' }),
+  ], config);
+
+  assert.equal(ranking.find(entry => entry.player.id === 'a').participationBonus, 14);
+  assert.equal(ranking.find(entry => entry.player.id === 'a').wonGamesBonus, 24);
+  assert.equal(ranking.find(entry => entry.player.id === 'c').wonGamesBonus, 18);
+});
+
 test('editing and re-saving a result recalculates from history without duplicating derived points', () => {
   const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
   const original = calculatePadelIndividualRanking(players, [
@@ -221,4 +260,26 @@ test('master qualification keeps only the top 16 players with at least 6 matches
   assert.ok(!qualifiedIds.includes('p17'));
   assert.equal(qualifiedIds[0], 'p1');
   assert.equal(qualifiedIds[15], 'p16');
+});
+
+test('custom master settings drive qualification cutoff and minimum matches', () => {
+  const rankingEntries = Array.from({ length: 6 }).map((_, index) => ({
+    player: createPlayer(`p${index + 1}`, 1000),
+    rank: index + 1,
+    points: 2000 - index,
+    startingPoints: 1000,
+    matchesPlayed: index === 3 ? 1 : 2,
+    wins: 10,
+    losses: 0,
+    resultPoints: 50,
+    participationBonus: 20,
+    wonGamesBonus: 15,
+    distinctPartners: 3,
+    qualifiedForMaster: false,
+    eligibleForMaster: index === 3 ? false : true,
+  }));
+  const config = normalizePadelIndividualRulesConfig({ masterSize: 4, masterMinMatches: 2 });
+  const qualifiedIds = getPadelIndividualAutoQualifiedPlayerIds(rankingEntries, config);
+
+  assert.deepEqual(qualifiedIds, ['p1', 'p2', 'p3', 'p5']);
 });

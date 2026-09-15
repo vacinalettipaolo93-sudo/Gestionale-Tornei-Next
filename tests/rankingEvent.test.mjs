@@ -40,6 +40,7 @@ const {
   getEventType,
   getRankingEventLabel,
   isRankingEventType,
+  normalizeRankingData,
 } = await import(rankingEventModuleUrl);
 
 test('label mapping exposes exactly Paitone Arena League for ranking_padel_individuale', () => {
@@ -59,4 +60,30 @@ test('event type mapping and ranking initialization stay aligned for Paitone Are
   assert.equal(rankingData.rulesConfig?.wonGamesBonusEnabled, true);
   assert.equal(rankingData.rulesConfig?.masterSize, 16);
   assert.equal(rankingData.rulesConfig?.masterMinMatches, 6);
+});
+
+test('Paitone config normalization fills missing scoring and cap fields for existing events', () => {
+  const rankingData = normalizeRankingData({
+    matches: [],
+    slots: [],
+    participantIds: [],
+    rulesConfig: {
+      participationBase: 9,
+      masterSize: 12,
+    },
+    availabilities: {
+      p1: {
+        status: 'available',
+        days: ['monday'],
+        periods: ['evening'],
+      },
+    },
+  }, 'ranking_padel_individuale');
+
+  assert.equal(rankingData.rulesConfig.participationBase, 9);
+  assert.equal(rankingData.rulesConfig.participationMonthlyCap, 20);
+  assert.equal(rankingData.rulesConfig.wonGamesCap, 5);
+  assert.equal(rankingData.rulesConfig.masterSize, 12);
+  assert.equal(rankingData.rulesConfig.masterMinMatches, 6);
+  assert.equal(rankingData.availabilities.p1.status, 'available');
 });

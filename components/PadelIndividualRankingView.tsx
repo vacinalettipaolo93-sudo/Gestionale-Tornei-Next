@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { type Match, type Player, type SummerRankingData, type SummerRankingMasterPair, type SummerRankingMasterMatch } from '../types';
+import {
+  type Match,
+  type Player,
+  type SummerRankingData,
+  type SummerRankingMasterPair,
+  type SummerRankingMasterMatch,
+  type SummerRankingRulesConfig,
+} from '../types';
 import { PlusIcon } from './Icons';
 import {
+  DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG,
   calculatePadelIndividualAwards,
   calculatePadelIndividualCurrentRatings,
   calculatePadelIndividualMatchBreakdowns,
@@ -16,13 +24,29 @@ import {
   getPadelIndividualPairName,
   getPadelIndividualPreMatchInfo,
   getPadelIndividualTeamPlayerIds,
+  generatePadelIndividualRulesText,
   isPadelIndividualMatch,
-  PADEL_INDIVIDUAL_MASTER_MIN_MATCHES,
-  PADEL_INDIVIDUAL_MASTER_SIZE,
   PADEL_INDIVIDUAL_RANKING_NAME,
+  normalizePadelIndividualRulesConfig,
+  recomputePadelIndividualMasterBracket,
+  syncPadelIndividualMasterMatches,
 } from '../utils/padelIndividualRanking';
 import { matchIncludesPlayer } from '../utils/rankingEvent';
-import { recomputeSummerRankingMasterBracket, syncSummerRankingMasterMatches } from '../utils/summerRanking';
+import {
+  AVAILABILITY_DAYS,
+  AVAILABILITY_PERIODS,
+  type AvailabilityFormState,
+  buildAvailabilityPayload,
+  createAvailabilityFormState,
+  createEmptyAvailabilityDraft,
+  formatAvailabilityDays,
+  formatAvailabilityPeriods,
+  getAvailabilitySummary,
+  getNormalizedDays,
+  getNormalizedPeriods,
+  normalizeAvailabilityEntries,
+  toggleArrayValue,
+} from '../utils/rankingAvailability';
 
 interface PadelIndividualRankingViewProps {
   players: Player[];
@@ -36,7 +60,7 @@ interface PadelIndividualRankingViewProps {
   playersAdminLabel?: string;
 }
 
-type ActiveTab = 'ranking' | 'matches' | 'master' | 'rules' | 'players';
+type ActiveTab = 'ranking' | 'matches' | 'master' | 'availability' | 'rules' | 'settings' | 'players';
 
 type MatchFormState = {
   editingMatchId: string | null;
@@ -105,11 +129,11 @@ const createInitialMasterResultForm = (): MasterResultFormState => ({
   error: null,
 });
 
-const buildDefaultPairDrafts = (pairs?: SummerRankingMasterPair[]): MasterPairDraft[] => {
+const buildDefaultPairDrafts = (pairCount: number, pairs?: SummerRankingMasterPair[]): MasterPairDraft[] => {
   if (Array.isArray(pairs) && pairs.length > 0) {
     return pairs.map(pair => ({ id: pair.id, player1Id: pair.player1Id, player2Id: pair.player2Id }));
   }
-  return Array.from({ length: PADEL_INDIVIDUAL_MASTER_SIZE / 2 }).map((_, index) => ({
+  return Array.from({ length: Math.max(1, pairCount) }).map((_, index) => ({
     id: `pair-draft-${index + 1}`,
     player1Id: '',
     player2Id: '',
@@ -144,10 +168,24 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   const [isSavingMatch, setIsSavingMatch] = useState(false);
   const [matchFeedback, setMatchFeedback] = useState<string | null>(null);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
-  const [pairDrafts, setPairDrafts] = useState<MasterPairDraft[]>(() => buildDefaultPairDrafts(rankingData.padelIndividualMaster?.pairs));
+  const [rulesConfigForm, setRulesConfigForm] = useState<SummerRankingRulesConfig>(() => normalizePadelIndividualRulesConfig(rankingData.rulesConfig ?? DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG));
+  const [rulesSettingsError, setRulesSettingsError] = useState<string | null>(null);
+  const [rulesSettingsSuccess, setRulesSettingsSuccess] = useState<string | null>(null);
+  const [isSavingRulesSettings, setIsSavingRulesSettings] = useState(false);
+  const effectiveConfig = useMemo(
+    () => normalizePadelIndividualRulesConfig(rankingData.rulesConfig ?? DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG),
+    [rankingData.rulesConfig],
+  );
+  const pairCount = Math.max(1, Math.floor(effectiveConfig.masterSize / 2));
+  const [pairDrafts, setPairDrafts] = useState<MasterPairDraft[]>(() => buildDefaultPairDrafts(pairCount, rankingData.padelIndividualMaster?.pairs));
   const [masterFeedback, setMasterFeedback] = useState<string | null>(null);
   const [masterResultForm, setMasterResultForm] = useState<MasterResultFormState>(() => createInitialMasterResultForm());
   const [isSavingMaster, setIsSavingMaster] = useState(false);
+  const [availabilityForm, setAvailabilityForm] = useState<AvailabilityFormState>(() =>
+    createAvailabilityFormState(loggedInPlayerId ? rankingData.availabilities?.[loggedInPlayerId] : undefined)
+  );
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  const [isSavingAvailability, setIsSavingAvailability] = useState(false);
 
   const rankingParticipantIds = useMemo(
     () => Array.isArray(rankingData.participantIds) ? rankingData.participantIds : [],
@@ -167,42 +205,42 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   );
 
   const ranking = useMemo(
-    () => calculatePadelIndividualRanking(confirmedPlayers, rankingData.matches ?? []),
-    [confirmedPlayers, rankingData.matches],
+    () => calculatePadelIndividualRanking(confirmedPlayers, rankingData.matches ?? [], effectiveConfig),
+    [confirmedPlayers, rankingData.matches, effectiveConfig],
   );
 
   const matchBreakdowns = useMemo(
-    () => calculatePadelIndividualMatchBreakdowns(confirmedPlayers, rankingData.matches ?? []),
-    [confirmedPlayers, rankingData.matches],
+    () => calculatePadelIndividualMatchBreakdowns(confirmedPlayers, rankingData.matches ?? [], effectiveConfig),
+    [confirmedPlayers, rankingData.matches, effectiveConfig],
   );
 
   const autoQualifiedIds = useMemo(
-    () => getPadelIndividualAutoQualifiedPlayerIds(ranking),
-    [ranking],
+    () => getPadelIndividualAutoQualifiedPlayerIds(ranking, effectiveConfig),
+    [ranking, effectiveConfig],
   );
 
   const awards = useMemo(
-    () => calculatePadelIndividualAwards(ranking, rankingData.padelIndividualMaster),
-    [ranking, rankingData.padelIndividualMaster],
+    () => calculatePadelIndividualAwards(ranking, rankingData.padelIndividualMaster, effectiveConfig),
+    [ranking, rankingData.padelIndividualMaster, effectiveConfig],
   );
 
   const currentRatings = useMemo(
-    () => calculatePadelIndividualCurrentRatings(confirmedPlayers, rankingData.matches ?? []),
-    [confirmedPlayers, rankingData.matches],
+    () => calculatePadelIndividualCurrentRatings(confirmedPlayers, rankingData.matches ?? [], effectiveConfig),
+    [confirmedPlayers, rankingData.matches, effectiveConfig],
   );
 
   const previewRatings = useMemo(
     () => matchForm.editingMatchId
-      ? calculatePadelIndividualPreMatchRatings(confirmedPlayers, rankingData.matches ?? [], matchForm.editingMatchId)
+      ? calculatePadelIndividualPreMatchRatings(confirmedPlayers, rankingData.matches ?? [], effectiveConfig, matchForm.editingMatchId)
       : currentRatings,
-    [confirmedPlayers, currentRatings, matchForm.editingMatchId, rankingData.matches],
+    [confirmedPlayers, currentRatings, effectiveConfig, matchForm.editingMatchId, rankingData.matches],
   );
 
   const previewTeam1 = [matchForm.team1Player1Id, matchForm.team1Player2Id].filter(Boolean);
   const previewTeam2 = [matchForm.team2Player1Id, matchForm.team2Player2Id].filter(Boolean);
   const previewInfo = useMemo(
-    () => getPadelIndividualPreMatchInfo(previewRatings, previewTeam1, previewTeam2),
-    [previewRatings, previewTeam1.join(':'), previewTeam2.join(':')],
+    () => getPadelIndividualPreMatchInfo(previewRatings, previewTeam1, previewTeam2, effectiveConfig),
+    [previewRatings, effectiveConfig, previewTeam1.join(':'), previewTeam2.join(':')],
   );
 
   const visibleMatches = useMemo(
@@ -254,10 +292,25 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
     () => (rankingData.padelIndividualMaster?.matches ?? []).slice().sort((left, right) => left.round - right.round || left.label.localeCompare(right.label)),
     [rankingData.padelIndividualMaster?.matches],
   );
+  const currentPlayer = confirmedPlayers.find(player => player.id === loggedInPlayerId);
+  const currentPlayerAvailability = loggedInPlayerId ? rankingData.availabilities?.[loggedInPlayerId] : undefined;
+  const isLegacyAvailability = !!currentPlayerAvailability && !(currentPlayerAvailability.entries?.length > 0);
+  const currentAvailabilitySummary = useMemo(
+    () => getAvailabilitySummary(availabilityForm.entries.length > 0 ? { entries: availabilityForm.entries } : undefined),
+    [availabilityForm.entries],
+  );
 
   useEffect(() => {
-    setPairDrafts(buildDefaultPairDrafts(rankingData.padelIndividualMaster?.pairs));
-  }, [rankingData.padelIndividualMaster?.pairs]);
+    setRulesConfigForm(effectiveConfig);
+  }, [effectiveConfig]);
+
+  useEffect(() => {
+    setPairDrafts(buildDefaultPairDrafts(pairCount, rankingData.padelIndividualMaster?.pairs));
+  }, [pairCount, rankingData.padelIndividualMaster?.pairs]);
+
+  useEffect(() => {
+    setAvailabilityForm(createAvailabilityFormState(loggedInPlayerId ? rankingData.availabilities?.[loggedInPlayerId] : undefined));
+  }, [loggedInPlayerId, rankingData.availabilities]);
 
   const resetMatchForm = () => {
     setMatchForm(createInitialMatchForm());
@@ -366,12 +419,15 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   };
 
   const validateMasterPairs = () => {
-    if (autoQualifiedIds.length < PADEL_INDIVIDUAL_MASTER_SIZE) {
-      return `Servono ${PADEL_INDIVIDUAL_MASTER_SIZE} giocatori con almeno ${PADEL_INDIVIDUAL_MASTER_MIN_MATCHES} partite per generare il Master.`;
+    if (effectiveConfig.masterSize % 2 !== 0) {
+      return 'La dimensione del Master deve essere un numero pari di giocatori.';
+    }
+    if (autoQualifiedIds.length < effectiveConfig.masterSize) {
+      return `Servono ${effectiveConfig.masterSize} giocatori con almeno ${effectiveConfig.masterMinMatches} partite per generare il Master.`;
     }
     const flatIds = pairDrafts.flatMap(pair => [pair.player1Id, pair.player2Id]).filter(Boolean);
-    if (flatIds.length !== PADEL_INDIVIDUAL_MASTER_SIZE) return 'Completa tutte le 8 coppie del Master.';
-    if (new Set(flatIds).size !== PADEL_INDIVIDUAL_MASTER_SIZE) return 'Ogni qualificato può comparire una sola volta nel Master.';
+    if (flatIds.length !== effectiveConfig.masterSize) return `Completa tutte le ${pairCount} coppie del Master.`;
+    if (new Set(flatIds).size !== effectiveConfig.masterSize) return 'Ogni qualificato può comparire una sola volta nel Master.';
     if (flatIds.some(playerId => !autoQualifiedIds.includes(playerId))) return 'Puoi formare il Master solo con i qualificati correnti.';
     return null;
   };
@@ -388,7 +444,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       player1Id: draft.player1Id,
       player2Id: draft.player2Id,
     }));
-    const nextMaster = createPadelIndividualMasterData(autoQualifiedIds, pairs);
+    const nextMaster = createPadelIndividualMasterData(autoQualifiedIds, pairs, effectiveConfig);
     if (!nextMaster) {
       setMasterFeedback('Impossibile generare il Master con i dati selezionati.');
       return;
@@ -413,7 +469,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
         ...rankingData,
         padelIndividualMaster: undefined,
       });
-      setPairDrafts(buildDefaultPairDrafts());
+      setPairDrafts(buildDefaultPairDrafts(pairCount));
       setMasterResultForm(createInitialMasterResultForm());
       setMasterFeedback('Master annullato correttamente.');
     } catch (error) {
@@ -454,7 +510,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
           }
           : item,
       );
-      const nextBracket = recomputeSummerRankingMasterBracket({
+      const nextBracket = recomputePadelIndividualMasterBracket({
         ...rankingData.padelIndividualMaster.bracket,
         matches: rankingData.padelIndividualMaster.bracket.matches.map(item =>
           item.id === match.id
@@ -468,7 +524,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
         padelIndividualMaster: {
           ...rankingData.padelIndividualMaster,
           bracket: nextBracket,
-          matches: syncSummerRankingMasterMatches(nextBracket, nextMatches),
+          matches: syncPadelIndividualMasterMatches(nextBracket, nextMatches),
         },
       });
       setMasterResultForm(createInitialMasterResultForm());
@@ -495,7 +551,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
           }
           : item,
       );
-      const nextBracket = recomputeSummerRankingMasterBracket({
+      const nextBracket = recomputePadelIndividualMasterBracket({
         ...rankingData.padelIndividualMaster.bracket,
         matches: rankingData.padelIndividualMaster.bracket.matches.map(item =>
           item.id === match.id
@@ -508,7 +564,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
         padelIndividualMaster: {
           ...rankingData.padelIndividualMaster,
           bracket: nextBracket,
-          matches: syncSummerRankingMasterMatches(nextBracket, nextMatches),
+          matches: syncPadelIndividualMasterMatches(nextBracket, nextMatches),
         },
       });
       setMasterFeedback('Risultato Master ripristinato.');
@@ -518,6 +574,124 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       setMasterFeedback('Ripristino non riuscito. Riprova.');
     }
   };
+
+  const updateRulesConfig = (key: keyof SummerRankingRulesConfig, rawValue: string) => {
+    const parsed = Number(rawValue);
+    if (!Number.isNaN(parsed)) {
+      setRulesConfigForm(previous => ({ ...previous, [key]: parsed }));
+    }
+    setRulesSettingsError(null);
+    setRulesSettingsSuccess(null);
+  };
+
+  const toggleRulesConfigFlag = (key: 'participationBonusEnabled' | 'wonGamesBonusEnabled') => {
+    setRulesConfigForm(previous => ({ ...previous, [key]: !previous[key] }));
+    setRulesSettingsError(null);
+    setRulesSettingsSuccess(null);
+  };
+
+  const resetRulesSettings = () => {
+    setRulesConfigForm(effectiveConfig);
+    setRulesSettingsError(null);
+    setRulesSettingsSuccess(null);
+  };
+
+  const persistAvailabilityEntries = async (entries: AvailabilityFormState['entries']) => {
+    if (!currentPlayer) return;
+    const nextAvailabilities = { ...(rankingData.availabilities ?? {}) };
+    const nextAvailability = buildAvailabilityPayload(entries);
+
+    if (nextAvailability) nextAvailabilities[currentPlayer.id] = nextAvailability;
+    else delete nextAvailabilities[currentPlayer.id];
+
+    setIsSavingAvailability(true);
+    setAvailabilityError(null);
+    try {
+      await onSaveRankingData({
+        ...rankingData,
+        availabilities: nextAvailabilities,
+      });
+      setAvailabilityForm({
+        entries: nextAvailability?.entries ?? [],
+        isEditorOpen: false,
+        editingEntryId: null,
+        draft: createEmptyAvailabilityDraft(),
+      });
+    } catch (error) {
+      console.error('Errore durante il salvataggio delle disponibilità:', error);
+      setAvailabilityError('Non è stato possibile salvare le disponibilità. Riprova.');
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  };
+
+  const handleSubmitAvailabilityEntry = async () => {
+    const days = getNormalizedDays(availabilityForm.draft.days);
+    const periods = getNormalizedPeriods(availabilityForm.draft.periods);
+
+    if (days.length === 0) {
+      setAvailabilityError('Seleziona almeno un giorno.');
+      return;
+    }
+
+    if (availabilityForm.draft.status === 'available' && periods.length === 0) {
+      setAvailabilityError('Seleziona almeno una fascia oraria per una disponibilità disponibile.');
+      return;
+    }
+
+    const nextEntry = {
+      id: availabilityForm.editingEntryId ?? generateId('availability'),
+      status: availabilityForm.draft.status,
+      days,
+      periods: availabilityForm.draft.status === 'available' ? periods : [],
+    };
+
+    const nextEntries = availabilityForm.editingEntryId
+      ? availabilityForm.entries.map(entry => (entry.id === availabilityForm.editingEntryId ? nextEntry : entry))
+      : [...availabilityForm.entries, nextEntry];
+
+    await persistAvailabilityEntries(nextEntries);
+  };
+
+  const handleDeleteAvailabilityEntry = async (entryId: string) => {
+    await persistAvailabilityEntries(availabilityForm.entries.filter(entry => entry.id !== entryId));
+  };
+
+  const handleClearAvailabilityEntries = async () => {
+    await persistAvailabilityEntries([]);
+  };
+
+  const handleSaveRulesSettings = async () => {
+    if (rulesConfigForm.masterSize % 2 !== 0) {
+      setRulesSettingsError('La dimensione del Master deve essere un numero pari di giocatori.');
+      return;
+    }
+    setIsSavingRulesSettings(true);
+    setRulesSettingsError(null);
+    setRulesSettingsSuccess(null);
+    try {
+      await onSaveRankingData({
+        ...rankingData,
+        rulesConfig: normalizePadelIndividualRulesConfig(rulesConfigForm),
+      });
+      setRulesSettingsSuccess('Impostazioni salvate con successo. La classifica è stata aggiornata.');
+    } catch (error) {
+      console.error('Errore salvataggio impostazioni Paitone Arena League', error);
+      setRulesSettingsError('Salvataggio non riuscito. Riprova.');
+    } finally {
+      setIsSavingRulesSettings(false);
+    }
+  };
+
+  const hasRulesSettingsChanges = useMemo(
+    () => JSON.stringify(normalizePadelIndividualRulesConfig(rulesConfigForm)) !== JSON.stringify(effectiveConfig),
+    [effectiveConfig, rulesConfigForm],
+  );
+
+  const effectiveRulesText = useMemo(
+    () => generatePadelIndividualRulesText(effectiveConfig),
+    [effectiveConfig],
+  );
 
   const pairOptions = autoQualifiedIds.map(playerId => playerMap.get(playerId)).filter(Boolean) as Player[];
 
@@ -538,7 +712,9 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
             ['ranking', 'Ranking'],
             ['matches', 'Partite'],
             ['master', 'Master finale'],
+            ['availability', 'Disponibilità'],
             ['rules', 'Regolamento'],
+            ...(isOrganizer ? [['settings', 'Impostazioni'] as [ActiveTab, string]] : []),
             ['players', 'Giocatori'],
           ] as Array<[ActiveTab, string]>).map(([tab, label]) => (
             <button
@@ -614,7 +790,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                       ) : entry.eligibleForMaster ? (
                         <span className="inline-flex rounded-full bg-yellow-500/15 text-yellow-100 px-2.5 py-1 text-xs font-semibold border border-yellow-400/30">In corsa</span>
                       ) : (
-                        <span className="inline-flex rounded-full bg-tertiary text-text-secondary px-2.5 py-1 text-xs font-semibold">Minimo {PADEL_INDIVIDUAL_MASTER_MIN_MATCHES} partite</span>
+                        <span className="inline-flex rounded-full bg-tertiary text-text-secondary px-2.5 py-1 text-xs font-semibold">Minimo {effectiveConfig.masterMinMatches} partite</span>
                       )}
                     </td>
                   </tr>
@@ -816,12 +992,12 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-secondary rounded-xl p-5 shadow-lg">
               <div className="text-sm text-text-secondary">Qualificati automatici</div>
-              <div className="text-xl font-bold mt-2">{autoQualifiedIds.length}/{PADEL_INDIVIDUAL_MASTER_SIZE}</div>
-              <div className="text-text-secondary mt-1">Solo chi ha almeno {PADEL_INDIVIDUAL_MASTER_MIN_MATCHES} partite.</div>
+              <div className="text-xl font-bold mt-2">{autoQualifiedIds.length}/{effectiveConfig.masterSize}</div>
+              <div className="text-text-secondary mt-1">Solo chi ha almeno {effectiveConfig.masterMinMatches} partite.</div>
             </div>
             <div className="bg-secondary rounded-xl p-5 shadow-lg">
               <div className="text-sm text-text-secondary">Coppie Master</div>
-              <div className="text-xl font-bold mt-2">{masterPairs.length}/8</div>
+              <div className="text-xl font-bold mt-2">{masterPairs.length}/{pairCount}</div>
               <div className="text-text-secondary mt-1">Formazione manuale dell’organizzazione.</div>
             </div>
             <div className="bg-secondary rounded-xl p-5 shadow-lg">
@@ -834,7 +1010,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
           <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
             <div>
               <h3 className="text-lg font-bold text-accent">Giocatori qualificati al Master</h3>
-              <p className="text-sm text-text-secondary">Top {PADEL_INDIVIDUAL_MASTER_SIZE} con almeno {PADEL_INDIVIDUAL_MASTER_MIN_MATCHES} partite giocate.</p>
+              <p className="text-sm text-text-secondary">Top {effectiveConfig.masterSize} con almeno {effectiveConfig.masterMinMatches} partite giocate.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
               {autoQualifiedIds.map(playerId => {
@@ -854,7 +1030,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
           {isOrganizer && (
             <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
               <div>
-                <h3 className="text-lg font-bold text-accent">Forma le 8 coppie del Master</h3>
+                <h3 className="text-lg font-bold text-accent">Forma le coppie del Master</h3>
                 <p className="text-sm text-text-secondary">Seleziona manualmente le coppie usando solo i qualificati correnti.</p>
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -923,14 +1099,449 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
         </div>
       )}
 
+      {activeTab === 'availability' && (
+        <div className="space-y-6">
+          <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-accent">Disponibilità utente</h3>
+                <p className="text-sm text-text-secondary">Usa lo stesso modello disponibilità della Summer Ranking per indicare giorni e fasce orarie.</p>
+              </div>
+              {currentPlayerAvailability?.updatedAt && availabilityForm.entries.length > 0 && (
+                <div className="text-xs text-text-secondary">Ultimo aggiornamento: {formatDateTime(currentPlayerAvailability.updatedAt)}</div>
+              )}
+            </div>
+
+            {currentPlayer ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-tertiary bg-primary/40 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-text-primary">Disponibilità dichiarate</div>
+                      <p className="mt-1 text-xs text-text-secondary">Crea più disponibilità separate e gestiscile una per una.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setAvailabilityError(null);
+                        setAvailabilityForm(previous => ({
+                          ...previous,
+                          isEditorOpen: true,
+                          editingEntryId: null,
+                          draft: createEmptyAvailabilityDraft(),
+                        }));
+                      }}
+                      disabled={isSavingAvailability}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-highlight px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <PlusIcon className="h-4 w-4" />
+                      Crea disponibilità
+                    </button>
+                  </div>
+
+                  {isLegacyAvailability && (
+                    <div className="mt-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-100">
+                      È stata rilevata una disponibilità nel formato precedente: la trovi già convertita nel nuovo elenco e puoi modificarla liberamente.
+                    </div>
+                  )}
+
+                  {availabilityError && (
+                    <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                      {availabilityError}
+                    </div>
+                  )}
+
+                  {availabilityForm.isEditorOpen && (
+                    <div className="mt-4 rounded-xl border border-tertiary bg-secondary p-4">
+                      <div className="text-sm font-semibold text-text-primary">
+                        {availabilityForm.editingEntryId ? 'Modifica disponibilità' : 'Nuova disponibilità'}
+                      </div>
+                      <div className="mt-4">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">Stato</div>
+                        <div className="flex flex-wrap gap-2">
+                          {([
+                            ['available', 'Disponibile'],
+                            ['unavailable', 'Non disponibile'],
+                          ] as const).map(([value, label]) => (
+                            <button
+                              key={value}
+                              onClick={() => setAvailabilityForm(previous => ({
+                                ...previous,
+                                draft: {
+                                  ...previous.draft,
+                                  status: value,
+                                  periods: value === 'available' ? previous.draft.periods : [],
+                                },
+                              }))}
+                              className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                                availabilityForm.draft.status === value
+                                  ? value === 'available'
+                                    ? 'border-green-500 bg-green-500/15 text-green-300'
+                                    : 'border-red-500 bg-red-500/15 text-red-300'
+                                  : 'border-tertiary bg-primary text-text-primary'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">Giorni</div>
+                        <div className="flex flex-wrap gap-2">
+                          {AVAILABILITY_DAYS.map(day => (
+                            <button
+                              key={day.value}
+                              onClick={() => setAvailabilityForm(previous => ({
+                                ...previous,
+                                draft: {
+                                  ...previous.draft,
+                                  days: toggleArrayValue(previous.draft.days, day.value),
+                                },
+                              }))}
+                              className={`rounded-lg border px-3 py-2 text-sm ${
+                                availabilityForm.draft.days.includes(day.value)
+                                  ? 'border-highlight bg-highlight text-white'
+                                  : 'border-tertiary bg-primary text-text-primary'
+                              }`}
+                            >
+                              {day.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {availabilityForm.draft.status === 'available' ? (
+                        <div className="mt-4">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">Fasce orarie</div>
+                          <div className="flex flex-wrap gap-2">
+                            {AVAILABILITY_PERIODS.map(period => (
+                              <button
+                                key={period.value}
+                                onClick={() => setAvailabilityForm(previous => ({
+                                  ...previous,
+                                  draft: {
+                                    ...previous.draft,
+                                    periods: toggleArrayValue(previous.draft.periods, period.value),
+                                  },
+                                }))}
+                                className={`rounded-lg border px-3 py-2 text-sm ${
+                                  availabilityForm.draft.periods.includes(period.value)
+                                    ? 'border-highlight bg-highlight text-white'
+                                    : 'border-tertiary bg-primary text-text-primary'
+                                }`}
+                              >
+                                {period.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-lg border border-tertiary bg-primary px-3 py-2 text-xs text-text-secondary">
+                          Per le disponibilità “Non disponibile” verranno salvati solo i giorni selezionati.
+                        </div>
+                      )}
+
+                      <div className="mt-5 flex flex-wrap gap-3">
+                        <button
+                          onClick={handleSubmitAvailabilityEntry}
+                          disabled={isSavingAvailability}
+                          className="rounded-lg bg-highlight px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isSavingAvailability
+                            ? 'Salvataggio...'
+                            : availabilityForm.editingEntryId
+                              ? 'Salva modifica'
+                              : 'Aggiungi disponibilità'}
+                        </button>
+                        <button
+                          onClick={() => setAvailabilityForm(previous => ({ ...previous, draft: createEmptyAvailabilityDraft() }))}
+                          disabled={isSavingAvailability}
+                          className="rounded-lg bg-tertiary px-4 py-2 text-sm font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Ripristina
+                        </button>
+                        <button
+                          onClick={() => {
+                            setAvailabilityError(null);
+                            setAvailabilityForm(previous => ({
+                              ...previous,
+                              isEditorOpen: false,
+                              editingEntryId: null,
+                              draft: createEmptyAvailabilityDraft(),
+                            }));
+                          }}
+                          disabled={isSavingAvailability}
+                          className="rounded-lg border border-tertiary px-4 py-2 text-sm font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Annulla
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="mb-3 text-sm font-semibold text-text-primary">Elenco disponibilità create</div>
+                  {availabilityForm.entries.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-tertiary bg-primary px-4 py-5 text-sm text-text-secondary">
+                      Nessuna disponibilità dichiarata.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {availabilityForm.entries.map(entry => (
+                        <div key={entry.id} className="rounded-xl border border-tertiary bg-primary p-4">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="space-y-2">
+                              <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold ${
+                                entry.status === 'available'
+                                  ? 'bg-green-500/15 text-green-300 border border-green-500/30'
+                                  : 'bg-red-500/15 text-red-300 border border-red-500/30'
+                              }`}>
+                                {entry.status === 'available' ? 'Disponibile' : 'Non disponibile'}
+                              </span>
+                              <div className="text-sm font-semibold text-text-primary">{formatAvailabilityDays(entry.days)}</div>
+                              {entry.status === 'available' && (
+                                <div className="text-xs text-text-secondary">{formatAvailabilityPeriods(entry.periods ?? [])}</div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={() => {
+                                  setAvailabilityError(null);
+                                  setAvailabilityForm(previous => ({
+                                    ...previous,
+                                    isEditorOpen: true,
+                                    editingEntryId: entry.id ?? null,
+                                    draft: {
+                                      status: entry.status,
+                                      days: [...entry.days],
+                                      periods: [...(entry.periods ?? [])],
+                                    },
+                                  }));
+                                }}
+                                disabled={isSavingAvailability}
+                                className="rounded-lg bg-tertiary px-3 py-2 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Modifica
+                              </button>
+                              <button
+                                onClick={() => entry.id && handleDeleteAvailabilityEntry(entry.id)}
+                                disabled={isSavingAvailability}
+                                className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Elimina disponibilità
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-tertiary bg-primary p-4 text-sm text-text-secondary">
+                  <div className="font-semibold text-text-primary">Riepilogo tabella</div>
+                  <div className="mt-1">{currentAvailabilitySummary.status}</div>
+                  {currentAvailabilitySummary.details && <div className="mt-1">{currentAvailabilitySummary.details}</div>}
+                </div>
+
+                {availabilityForm.entries.length > 0 && (
+                  <button
+                    onClick={handleClearAvailabilityEntries}
+                    disabled={isSavingAvailability}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Elimina tutte le disponibilità dichiarate
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-tertiary bg-primary p-4 text-text-secondary">
+                Accedi con un profilo giocatore confermato per impostare la disponibilità.
+              </div>
+            )}
+          </div>
+
+          <div className="bg-secondary rounded-xl shadow-lg p-5">
+            <div className="mb-4">
+              <h3 className="text-lg font-bold text-accent">Disponibilità partecipanti</h3>
+              <p className="text-sm text-text-secondary">Gli organizzatori possono consultare e gestire la disponibilità secondo il modello già usato nel ranking estivo.</p>
+            </div>
+            <div className="space-y-3">
+              {ranking.map(entry => {
+                const availabilitySummary = getAvailabilitySummary(rankingData.availabilities?.[entry.player.id]);
+                const normalizedEntries = normalizeAvailabilityEntries(rankingData.availabilities?.[entry.player.id]);
+                return (
+                  <div key={entry.player.id} className="rounded-xl border border-tertiary/40 bg-primary/30 p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="font-semibold text-text-primary">{entry.player.name}</div>
+                        <div className="text-sm text-text-secondary">{availabilitySummary.status}</div>
+                      </div>
+                      {availabilitySummary.details && (
+                        <div className="text-sm text-text-secondary">{availabilitySummary.details}</div>
+                      )}
+                    </div>
+                    {isOrganizer && normalizedEntries.length > 1 && (
+                      <div className="mt-3 space-y-2 text-xs text-text-secondary">
+                        {normalizedEntries.map(item => (
+                          <div key={item.id}>
+                            <span className="font-semibold text-text-primary">{item.status === 'available' ? 'Disponibile' : 'Non disponibile'}:</span>{' '}
+                            {formatAvailabilityDays(item.days)}
+                            {item.status === 'available' && item.periods?.length ? ` • ${formatAvailabilityPeriods(item.periods)}` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {ranking.length === 0 && <div className="text-sm text-text-secondary">Nessun partecipante confermato nell’evento.</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'settings' && isOrganizer && (
+        <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-5">
+          <div>
+            <h3 className="text-lg font-bold text-accent">Impostazioni Paitone Arena League</h3>
+            <p className="text-sm text-text-secondary">Personalizza punti, fasce, bonus e requisiti Master mantenendo i default ufficiali come base.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="space-y-1 text-sm">
+              <span className="text-text-secondary">Fascia equilibrata fino a</span>
+              <input type="number" min="0" value={rulesConfigForm.diffBandLowMax} onChange={event => updateRulesConfig('diffBandLowMax', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-text-secondary">Fascia media fino a</span>
+              <input type="number" min="0" value={rulesConfigForm.diffBandMediumMax} onChange={event => updateRulesConfig('diffBandMediumMax', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 space-y-3">
+              <div className="text-sm font-semibold text-text-primary">Punti coppia favorita</div>
+              {([
+                ['favoriteWinLow', 'Vittoria equilibrata'],
+                ['favoriteLossLow', 'Sconfitta equilibrata'],
+                ['favoriteWinMedium', 'Vittoria differenza media'],
+                ['favoriteLossMedium', 'Sconfitta differenza media'],
+                ['favoriteWinHigh', 'Vittoria differenza alta'],
+                ['favoriteLossHigh', 'Sconfitta differenza alta'],
+              ] as Array<[keyof SummerRankingRulesConfig, string]>).map(([key, label]) => (
+                <label key={key} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-text-secondary">{label}</span>
+                  <input type="number" value={rulesConfigForm[key] as number} onChange={event => updateRulesConfig(key, event.target.value)} className="w-28 bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+                </label>
+              ))}
+            </div>
+
+            <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 space-y-3">
+              <div className="text-sm font-semibold text-text-primary">Punti coppia sfavorita</div>
+              {([
+                ['underdogWinLow', 'Vittoria equilibrata'],
+                ['underdogLossLow', 'Sconfitta equilibrata'],
+                ['underdogWinMedium', 'Vittoria differenza media'],
+                ['underdogLossMedium', 'Sconfitta differenza media'],
+                ['underdogWinHigh', 'Vittoria differenza alta'],
+                ['underdogLossHigh', 'Sconfitta differenza alta'],
+              ] as Array<[keyof SummerRankingRulesConfig, string]>).map(([key, label]) => (
+                <label key={key} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-text-secondary">{label}</span>
+                  <input type="number" value={rulesConfigForm[key] as number} onChange={event => updateRulesConfig(key, event.target.value)} className="w-28 bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-text-primary">Bonus partecipazione</div>
+                  <div className="text-xs text-text-secondary">Punti a presenza e limite mensile.</div>
+                </div>
+                <button onClick={() => toggleRulesConfigFlag('participationBonusEnabled')} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rulesConfigForm.participationBonusEnabled ? 'bg-accent' : 'bg-tertiary'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rulesConfigForm.participationBonusEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${rulesConfigForm.participationBonusEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                <label className="space-y-1 text-sm">
+                  <span className="text-text-secondary">Punti per partita</span>
+                  <input type="number" value={rulesConfigForm.participationBase} onChange={event => updateRulesConfig('participationBase', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-text-secondary">Cap mensile</span>
+                  <input type="number" min="0" value={rulesConfigForm.participationMonthlyCap} onChange={event => updateRulesConfig('participationMonthlyCap', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-text-primary">Bonus game</div>
+                  <div className="text-xs text-text-secondary">Punti per game vinto e massimo per partita.</div>
+                </div>
+                <button onClick={() => toggleRulesConfigFlag('wonGamesBonusEnabled')} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rulesConfigForm.wonGamesBonusEnabled ? 'bg-accent' : 'bg-tertiary'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rulesConfigForm.wonGamesBonusEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${rulesConfigForm.wonGamesBonusEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                <label className="space-y-1 text-sm">
+                  <span className="text-text-secondary">Punti per game</span>
+                  <input type="number" min="0" value={rulesConfigForm.wonGamesMultiplier} onChange={event => updateRulesConfig('wonGamesMultiplier', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-text-secondary">Cap per partita</span>
+                  <input type="number" min="0" value={rulesConfigForm.wonGamesCap} onChange={event => updateRulesConfig('wonGamesCap', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="space-y-1 text-sm">
+              <span className="text-text-secondary">Giocatori qualificati al Master</span>
+              <input type="number" min="2" step="2" value={rulesConfigForm.masterSize} onChange={event => updateRulesConfig('masterSize', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-text-secondary">Partite minime per qualificazione</span>
+              <input type="number" min="1" value={rulesConfigForm.masterMinMatches} onChange={event => updateRulesConfig('masterMinMatches', event.target.value)} className="w-full bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary" />
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4">
+            <div className="text-sm font-semibold text-text-primary mb-2">Anteprima regolamento aggiornato</div>
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-text-primary">{generatePadelIndividualRulesText(rulesConfigForm)}</pre>
+          </div>
+
+          {rulesSettingsError && <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{rulesSettingsError}</div>}
+          {rulesSettingsSuccess && <div className="rounded-lg border border-green-400/30 bg-green-500/10 px-3 py-2 text-sm text-green-200">{rulesSettingsSuccess}</div>}
+
+          <div className="flex flex-wrap gap-3">
+            <button onClick={handleSaveRulesSettings} disabled={isSavingRulesSettings || !hasRulesSettingsChanges} className="px-4 py-2 rounded bg-highlight text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed">
+              {isSavingRulesSettings ? 'Salvataggio...' : 'Salva impostazioni'}
+            </button>
+            <button onClick={resetRulesSettings} disabled={isSavingRulesSettings || !hasRulesSettingsChanges} className="px-4 py-2 rounded bg-tertiary text-text-primary font-semibold disabled:opacity-60 disabled:cursor-not-allowed">
+              Ripristina
+            </button>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'rules' && (
         <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
           <div>
-            <h3 className="text-lg font-bold text-accent">Regolamento rapido</h3>
-            <p className="text-sm text-text-secondary">Testo promozionale e regole operative del ranking padel individuale.</p>
+            <h3 className="text-lg font-bold text-accent">Regole Paitone Arena League</h3>
+            <p className="text-sm text-text-secondary">Testo promozionale e regole operative sempre allineate alla configurazione Paitone salvata.</p>
           </div>
           <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4">
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-text-primary">{rankingData.rules ?? DEFAULT_PADEL_INDIVIDUAL_RULES}</pre>
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-text-primary">{effectiveRulesText || DEFAULT_PADEL_INDIVIDUAL_RULES}</pre>
           </div>
         </div>
       )}

@@ -35,7 +35,11 @@ const ParticipantDashboard: React.FC<ParticipantDashboardProps> = ({ events, hea
         ? event.players.filter(player => player.status === 'confirmed' && participantIds.includes(player.id))
         : [];
       const ranking = event.eventType === 'ranking_padel_individuale'
-        ? calculatePadelIndividualRanking(confirmedPlayers, Array.isArray(rankingData?.matches) ? rankingData.matches : [])
+        ? calculatePadelIndividualRanking(
+          confirmedPlayers,
+          Array.isArray(rankingData?.matches) ? rankingData.matches : [],
+          rankingData?.rulesConfig,
+        )
         : calculateSummerRanking(confirmedPlayers, Array.isArray(rankingData?.matches) ? rankingData.matches : [], normalizeRulesConfig(rankingData?.rulesConfig));
       const myRanking = ranking.find(entry => entry.player.id === playerId);
       position = isInRanking && myRanking ? `${myRanking.rank}°` : '—';
