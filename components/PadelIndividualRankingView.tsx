@@ -267,6 +267,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
     }
     if (score1 === score2) return 'Nel padel individuale il risultato non può terminare in parità.';
     if (!matchForm.completedAt) return 'Inserisci la data della partita.';
+    if (Number.isNaN(new Date(matchForm.completedAt).getTime())) return 'Inserisci una data valida.';
     if (!previewInfo) return 'Completa le due coppie per calcolare la fascia partita.';
     return null;
   };
@@ -287,7 +288,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       score1: Number(matchForm.score1),
       score2: Number(matchForm.score2),
       status: 'completed',
-      completedAt: new Date(matchForm.completedAt).toISOString(),
+      completedAt: matchForm.completedAt,
     };
 
     setIsSavingMatch(true);
