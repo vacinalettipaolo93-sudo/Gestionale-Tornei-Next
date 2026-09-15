@@ -29,11 +29,13 @@ for (const relativePath of ['utils/summerRanking.js', 'utils/padelIndividualRank
   writeFileSync(absolutePath, source);
 }
 
+const padelModuleUrl = pathToFileURL(path.join(tempDir, 'utils/padelIndividualRanking.js')).href;
+
 const {
   calculatePadelIndividualMatchBreakdowns,
   calculatePadelIndividualRanking,
   getPadelIndividualAutoQualifiedPlayerIds,
-} = await import(pathToFileURL(path.join(tempDir, 'utils/padelIndividualRanking.js')).href);
+} = await import(padelModuleUrl);
 
 const createPlayer = (id, start) => ({
   id,
@@ -44,7 +46,7 @@ const createPlayer = (id, start) => ({
   summerRankingStartPoints: start,
 });
 
-const createMatch = ({ id = 'match-1', team1, team2, score1, score2, completedAt }) => ({
+const createMatch = ({ id = 'match-1', team1, team2, score1, score2, completedAt, monthKey = completedAt.slice(0, 7) }) => ({
   id,
   player1Id: team1[0],
   player2Id: team2[0],
@@ -54,9 +56,38 @@ const createMatch = ({ id = 'match-1', team1, team2, score1, score2, completedAt
   score2,
   status: 'completed',
   completedAt,
+  monthKey,
 });
 
 const getPlayerBreakdown = (breakdown, playerId) => breakdown.players.find(player => player.playerId === playerId);
+
+const getParticipationBonusInTimezone = ({ tz, players, matches, playerId = 'a' }) => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const { calculatePadelIndividualRanking } = await import(${JSON.stringify(padelModuleUrl)});
+       const players = JSON.parse(process.env.TEST_PLAYERS);
+       const matches = JSON.parse(process.env.TEST_MATCHES);
+       const ranking = calculatePadelIndividualRanking(players, matches);
+       process.stdout.write(String(ranking.find(entry => entry.player.id === process.env.TEST_PLAYER_ID)?.participationBonus ?? 'NaN'));`,
+    ],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        TZ: tz,
+        TEST_PLAYERS: JSON.stringify(players),
+        TEST_MATCHES: JSON.stringify(matches),
+        TEST_PLAYER_ID: playerId,
+      },
+      stdio: 'pipe',
+    },
+  ).toString();
+
+  return Number(output);
+};
 
 test('balanced band awards +20/-20 to every player on the winning/losing pair', () => {
   const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
@@ -116,28 +147,20 @@ test('monthly participation bonus uses stable calendar months and caps at +20 pe
   assert.equal(ranking.find(entry => entry.player.id === 'c').participationBonus, 25);
 });
 
-test('equivalent instants with explicit timezone offsets keep the same monthly participation bucket', () => {
+test('monthly participation bonus stays deterministic across different runtime timezones', () => {
   const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
-  const commonMatches = [
-    createMatch({ id: 'm1', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-01T10:00:00Z' }),
-    createMatch({ id: 'm2', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-10T10:00:00Z' }),
-    createMatch({ id: 'm3', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-20T10:00:00Z' }),
-    createMatch({ id: 'm4', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-28T20:00:00Z' }),
+  const matches = [
+    createMatch({ id: 'm1', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-01T10:00' }),
+    createMatch({ id: 'm2', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-10T10:00' }),
+    createMatch({ id: 'm3', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-20T10:00' }),
+    createMatch({ id: 'm4', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-28T23:30' }),
+    createMatch({ id: 'm5', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-03-01T00:15' }),
   ];
+  const bonusUtc = getParticipationBonusInTimezone({ tz: 'UTC', players, matches });
+  const bonusRome = getParticipationBonusInTimezone({ tz: 'Europe/Rome', players, matches });
 
-  const rankingWithUtc = calculatePadelIndividualRanking(players, [
-    ...commonMatches,
-    createMatch({ id: 'm5', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-28T23:30:00Z' }),
-  ]);
-  const rankingWithOffset = calculatePadelIndividualRanking(players, [
-    ...commonMatches,
-    createMatch({ id: 'm5', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-03-01T00:30:00+01:00' }),
-  ]);
-
-  assert.equal(
-    rankingWithUtc.find(entry => entry.player.id === 'a').participationBonus,
-    rankingWithOffset.find(entry => entry.player.id === 'a').participationBonus,
-  );
+  assert.equal(bonusUtc, 25);
+  assert.equal(bonusRome, 25);
 });
 
 test('won-games bonus is capped at +5 per player and per match', () => {

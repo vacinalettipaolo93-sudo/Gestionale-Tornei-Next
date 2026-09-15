@@ -20,6 +20,7 @@ export interface Match {
   field?: string;
   slotId?: string;
   completedAt?: string;
+  monthKey?: string;
   team1PlayerIds?: string[];
   team2PlayerIds?: string[];
 }

@@ -16,6 +16,7 @@ import {
   getPadelIndividualPairName,
   getPadelIndividualPreMatchInfo,
   getPadelIndividualTeamPlayerIds,
+  isPadelIndividualMatch,
   PADEL_INDIVIDUAL_MASTER_MIN_MATCHES,
   PADEL_INDIVIDUAL_MASTER_SIZE,
   PADEL_INDIVIDUAL_RANKING_NAME,
@@ -206,7 +207,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
 
   const visibleMatches = useMemo(
     () => (rankingData.matches ?? [])
-      .filter(match => Array.isArray(match.team1PlayerIds) && Array.isArray(match.team2PlayerIds))
+      .filter(isPadelIndividualMatch)
       .slice()
       .sort((left, right) => new Date(right.completedAt ?? right.scheduledTime ?? 0).getTime() - new Date(left.completedAt ?? left.scheduledTime ?? 0).getTime()),
     [rankingData.matches],
@@ -289,6 +290,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       score2: Number(matchForm.score2),
       status: 'completed',
       completedAt: matchForm.completedAt,
+      monthKey: matchForm.completedAt.slice(0, 7),
     };
 
     setIsSavingMatch(true);

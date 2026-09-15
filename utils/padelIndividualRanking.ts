@@ -202,14 +202,20 @@ const getResultPointsForSide = (band: PadelIndividualDiffBand, isFavorite: boole
   return won ? 30 : 10;
 };
 
-const getMonthKey = (value?: string) => {
-  const date = value ? new Date(value) : null;
+const getMonthKey = (match: Match) => {
+  if (typeof match.monthKey === 'string' && /^\d{4}-\d{2}$/.test(match.monthKey.trim())) {
+    return match.monthKey.trim();
+  }
+  const source = (match.completedAt ?? match.scheduledTime ?? '').trim();
+  const normalized = source.match(/^(\d{4})-(\d{2})/);
+  if (normalized) return `${normalized[1]}-${normalized[2]}`;
+  const date = source ? new Date(source) : null;
   if (!date || Number.isNaN(date.getTime())) return 'invalid';
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 };
 
-const getParticipantBonus = (monthlyCounts: Map<string, number>, playerId: string, playedAt?: string) => {
-  const monthKey = `${playerId}:${getMonthKey(playedAt)}`;
+const getParticipantBonus = (monthlyCounts: Map<string, number>, playerId: string, match: Match) => {
+  const monthKey = `${playerId}:${getMonthKey(match)}`;
   const currentCount = monthlyCounts.get(monthKey) ?? 0;
   monthlyCounts.set(monthKey, currentCount + 1);
   return currentCount * PADEL_INDIVIDUAL_PARTICIPATION_POINTS >= PADEL_INDIVIDUAL_PARTICIPATION_MONTHLY_CAP
@@ -261,7 +267,7 @@ const buildMatchBreakdown = (
   const players = [
     ...team1PlayerIds.map((playerId, index) => {
       const partnerId = team1PlayerIds[index === 0 ? 1 : 0];
-      const participationPoints = getParticipantBonus(monthlyCounts, playerId, playedAt);
+      const participationPoints = getParticipantBonus(monthlyCounts, playerId, match);
       partnerMap.get(playerId)?.add(partnerId);
       return {
         playerId,
@@ -277,7 +283,7 @@ const buildMatchBreakdown = (
     }),
     ...team2PlayerIds.map((playerId, index) => {
       const partnerId = team2PlayerIds[index === 0 ? 1 : 0];
-      const participationPoints = getParticipantBonus(monthlyCounts, playerId, playedAt);
+      const participationPoints = getParticipantBonus(monthlyCounts, playerId, match);
       partnerMap.get(playerId)?.add(partnerId);
       return {
         playerId,
@@ -493,7 +499,10 @@ export const removePlayerFromPadelIndividualMaster = (
 const getChampionPairId = (master?: PadelIndividualMasterData) => {
   if (!master?.matches?.length) return null;
   const finalMatch = master.matches.find(match => match.id === 'master-final')
-    ?? master.matches.slice().sort((left, right) => right.round - left.round)[0]
+    ?? master.matches
+      .filter(match => match.status === 'completed' && match.score1 !== null && match.score2 !== null && match.score1 !== match.score2)
+      .slice()
+      .sort((left, right) => right.round - left.round || right.label.localeCompare(left.label))[0]
     ?? null;
   if (!finalMatch || finalMatch.score1 === null || finalMatch.score2 === null || finalMatch.score1 === finalMatch.score2) return null;
   return (finalMatch.score1 ?? 0) > (finalMatch.score2 ?? 0) ? finalMatch.player1Id : finalMatch.player2Id;

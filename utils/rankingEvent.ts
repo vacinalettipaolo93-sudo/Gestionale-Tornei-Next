@@ -60,6 +60,7 @@ const sanitizeMatch = (match: Match): Match => {
   if (match.field !== undefined) result.field = match.field;
   if (match.slotId !== undefined) result.slotId = match.slotId;
   if (match.completedAt !== undefined) result.completedAt = match.completedAt;
+  if (match.monthKey !== undefined) result.monthKey = match.monthKey;
   if (Array.isArray(match.team1PlayerIds)) result.team1PlayerIds = match.team1PlayerIds.filter(Boolean);
   if (Array.isArray(match.team2PlayerIds)) result.team2PlayerIds = match.team2PlayerIds.filter(Boolean);
   return result;
