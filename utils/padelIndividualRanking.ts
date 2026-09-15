@@ -105,8 +105,8 @@ export const generatePadelIndividualRulesText = (config?: Partial<SummerRankingR
     `• Partita equilibrata: vincitori ${cfg.favoriteWinLow > 0 ? '+' : ''}${cfg.favoriteWinLow}, sconfitti ${cfg.favoriteLossLow > 0 ? '+' : ''}${cfg.favoriteLossLow}.`,
     `• Differenza media: favoriti ${cfg.favoriteWinMedium > 0 ? '+' : ''}${cfg.favoriteWinMedium} se vincono e ${cfg.favoriteLossMedium > 0 ? '+' : ''}${cfg.favoriteLossMedium} se perdono; sfavoriti ${cfg.underdogWinMedium > 0 ? '+' : ''}${cfg.underdogWinMedium} se vincono e ${cfg.underdogLossMedium > 0 ? '+' : ''}${cfg.underdogLossMedium} se perdono.`,
     `• Differenza alta: favoriti ${cfg.favoriteWinHigh > 0 ? '+' : ''}${cfg.favoriteWinHigh} se vincono e ${cfg.favoriteLossHigh > 0 ? '+' : ''}${cfg.favoriteLossHigh} se perdono; sfavoriti ${cfg.underdogWinHigh > 0 ? '+' : ''}${cfg.underdogWinHigh} se vincono e ${cfg.underdogLossHigh > 0 ? '+' : ''}${cfg.underdogLossHigh} se perdono.`,
-    `• Bonus partecipazione: ${cfg.participationBonusEnabled ? `${cfg.participationBase > 0 ? '+' : ''}${cfg.participationBase} a partita fino a un massimo di ${cfg.participationMonthlyCap > 0 ? `${cfg.participationMonthlyCap > 0 ? '+' : ''}${cfg.participationMonthlyCap}` : 'nessun limite'} al mese.` : 'disattivato.'}`,
-    `• Bonus game: ${cfg.wonGamesBonusEnabled ? `${cfg.wonGamesMultiplier > 0 ? '+' : ''}${cfg.wonGamesMultiplier} per ogni game vinto, massimo ${cfg.wonGamesCap > 0 ? `${cfg.wonGamesCap}` : 'nessun limite'} per partita e per giocatore.` : 'disattivato.'}`,
+    `• Bonus partecipazione: ${cfg.participationBonusEnabled ? `${cfg.participationBase > 0 ? '+' : ''}${cfg.participationBase} a partita fino a un massimo di ${cfg.participationMonthlyCap > 0 ? '+' : ''}${cfg.participationMonthlyCap} al mese.` : 'disattivato.'}`,
+    `• Bonus game: ${cfg.wonGamesBonusEnabled ? `${cfg.wonGamesMultiplier > 0 ? '+' : ''}${cfg.wonGamesMultiplier} per ogni game vinto, massimo ${cfg.wonGamesCap} per partita e per giocatore.` : 'disattivato.'}`,
     `• Master finale: top ${cfg.masterSize} con almeno ${cfg.masterMinMatches} partite giocate. Le coppie del Master vengono decise dall'organizzazione.`,
     '• Premi: coppia campione del Master, re del ranking (#1), premio fedeltà (più partite), social player (più compagni diversi).',
     '',
@@ -278,7 +278,7 @@ const getParticipantBonus = (
   const currentCount = monthlyCounts.get(monthKey) ?? 0;
   const currentTotal = currentCount * cfg.participationBase;
   monthlyCounts.set(monthKey, currentCount + 1);
-  if (cfg.participationMonthlyCap <= 0) return cfg.participationBase;
+  if (cfg.participationMonthlyCap <= 0) return 0;
   const remainingAllowance = cfg.participationMonthlyCap - currentTotal;
   if (remainingAllowance <= 0) return 0;
   return Math.min(cfg.participationBase, remainingAllowance);
@@ -325,8 +325,8 @@ const buildMatchBreakdown = (
   const team1Won = score1 > score2;
   const team1ResultPoints = getResultPointsForSide(preMatchInfo.band, preMatchInfo.favoriteSide === 1, team1Won, cfg);
   const team2ResultPoints = getResultPointsForSide(preMatchInfo.band, preMatchInfo.favoriteSide === 2, !team1Won, cfg);
-  const team1WonGamesPoints = cfg.wonGamesBonusEnabled ? Math.min(score1 * cfg.wonGamesMultiplier, cfg.wonGamesCap > 0 ? cfg.wonGamesCap : Number.POSITIVE_INFINITY) : 0;
-  const team2WonGamesPoints = cfg.wonGamesBonusEnabled ? Math.min(score2 * cfg.wonGamesMultiplier, cfg.wonGamesCap > 0 ? cfg.wonGamesCap : Number.POSITIVE_INFINITY) : 0;
+  const team1WonGamesPoints = cfg.wonGamesBonusEnabled && cfg.wonGamesCap > 0 ? Math.min(score1 * cfg.wonGamesMultiplier, cfg.wonGamesCap) : 0;
+  const team2WonGamesPoints = cfg.wonGamesBonusEnabled && cfg.wonGamesCap > 0 ? Math.min(score2 * cfg.wonGamesMultiplier, cfg.wonGamesCap) : 0;
   const playedAt = getMatchPlayedAt(match);
 
   const players = [

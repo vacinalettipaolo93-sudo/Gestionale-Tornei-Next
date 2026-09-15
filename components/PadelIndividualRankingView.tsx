@@ -666,6 +666,10 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       setRulesSettingsError('La dimensione del Master deve essere un numero pari di giocatori.');
       return;
     }
+    if (rulesConfigForm.diffBandMediumMax < rulesConfigForm.diffBandLowMax) {
+      setRulesSettingsError('La soglia della fascia media deve essere maggiore o uguale a quella della fascia equilibrata.');
+      return;
+    }
     setIsSavingRulesSettings(true);
     setRulesSettingsError(null);
     setRulesSettingsSuccess(null);
