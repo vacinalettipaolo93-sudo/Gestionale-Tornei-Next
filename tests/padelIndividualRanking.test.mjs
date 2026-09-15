@@ -116,6 +116,30 @@ test('monthly participation bonus uses stable calendar months and caps at +20 pe
   assert.equal(ranking.find(entry => entry.player.id === 'c').participationBonus, 25);
 });
 
+test('equivalent instants with explicit timezone offsets keep the same monthly participation bucket', () => {
+  const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
+  const commonMatches = [
+    createMatch({ id: 'm1', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-01T10:00:00Z' }),
+    createMatch({ id: 'm2', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-10T10:00:00Z' }),
+    createMatch({ id: 'm3', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-20T10:00:00Z' }),
+    createMatch({ id: 'm4', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-28T20:00:00Z' }),
+  ];
+
+  const rankingWithUtc = calculatePadelIndividualRanking(players, [
+    ...commonMatches,
+    createMatch({ id: 'm5', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-02-28T23:30:00Z' }),
+  ]);
+  const rankingWithOffset = calculatePadelIndividualRanking(players, [
+    ...commonMatches,
+    createMatch({ id: 'm5', team1: ['a', 'b'], team2: ['c', 'd'], score1: 6, score2: 4, completedAt: '2026-03-01T00:30:00+01:00' }),
+  ]);
+
+  assert.equal(
+    rankingWithUtc.find(entry => entry.player.id === 'a').participationBonus,
+    rankingWithOffset.find(entry => entry.player.id === 'a').participationBonus,
+  );
+});
+
 test('won-games bonus is capped at +5 per player and per match', () => {
   const players = ['a', 'b', 'c', 'd'].map(id => createPlayer(id, 1000));
   const ranking = calculatePadelIndividualRanking(players, [

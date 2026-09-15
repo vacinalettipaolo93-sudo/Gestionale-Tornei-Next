@@ -312,7 +312,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   };
 
   const handleDeleteMatch = async (match: Match) => {
-    if (!canManageMatch(match, isOrganizer, loggedInPlayerId)) return;
+    if (!isOrganizer) return;
     if (!window.confirm('Eliminare questa partita dal ranking?')) return;
     try {
       await onSaveRankingData({
@@ -733,7 +733,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                         {canManageMatch(match, isOrganizer, loggedInPlayerId) && (
                           <button onClick={() => handleEditMatch(match)} className="px-3 py-1 rounded bg-tertiary text-text-primary text-xs font-semibold">Modifica</button>
                         )}
-                        {canManageMatch(match, isOrganizer, loggedInPlayerId) && (
+                        {isOrganizer && (
                           <button onClick={() => handleDeleteMatch(match)} className="px-3 py-1 rounded bg-red-600 text-white text-xs font-semibold">Elimina</button>
                         )}
                       </div>

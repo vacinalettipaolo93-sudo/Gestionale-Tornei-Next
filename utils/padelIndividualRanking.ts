@@ -203,10 +203,6 @@ const getResultPointsForSide = (band: PadelIndividualDiffBand, isFavorite: boole
 };
 
 const getMonthKey = (value?: string) => {
-  if (typeof value === 'string') {
-    const normalized = value.trim().match(/^(\d{4})-(\d{2})/);
-    if (normalized) return `${normalized[1]}-${normalized[2]}`;
-  }
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return 'invalid';
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
