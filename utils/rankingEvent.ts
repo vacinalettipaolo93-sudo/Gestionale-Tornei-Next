@@ -24,7 +24,7 @@ export const getEventType = (event?: Partial<Event> | null): NonNullable<Event['
 
 export const getRankingEventLabel = (eventType?: Event['eventType'] | null) =>
   eventType === 'ranking_padel_individuale'
-    ? 'Ranking padel individuale'
+    ? 'Paitone Arena League'
     : 'Ranking tennis singolare';
 
 export const getDefaultRankingRules = (eventType?: Event['eventType'] | null) =>

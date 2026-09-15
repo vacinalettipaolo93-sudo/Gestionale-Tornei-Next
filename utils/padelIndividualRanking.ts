@@ -10,7 +10,7 @@ import {
   syncSummerRankingMasterMatches,
 } from './summerRanking';
 
-export const PADEL_INDIVIDUAL_RANKING_NAME = 'Ranking padel individuale';
+export const PADEL_INDIVIDUAL_RANKING_NAME = 'Paitone Arena League';
 export const PADEL_INDIVIDUAL_EVENT_NAMES = [
   'PAITONE ARENA LEAGUE',
   'WINTER LAGUE PADEL PAITONE ARENA',

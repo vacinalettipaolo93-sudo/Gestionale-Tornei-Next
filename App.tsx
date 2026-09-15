@@ -730,7 +730,7 @@ const App: React.FC = () => {
               loggedInPlayerId={loggedInPlayerId}
               onSaveRankingData={(nextData) => saveEventRankingData(currentEventState.id, 'ranking_padel_individuale', nextData)}
               onOpenPlayersAdmin={isOrganizer ? () => setCurrentView('playersAdmin') : undefined}
-              title={`${currentEventState.name} • Ranking padel individuale`}
+              title={`${currentEventState.name} • Paitone Arena League`}
               description="Campionato individuale di padel con partner liberi, bonus, storico punti e Master finale."
               playersAdminLabel="Apri gestione giocatori evento"
             />
@@ -881,7 +881,7 @@ const App: React.FC = () => {
                   className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary focus:ring-2 focus:ring-accent focus:border-accent"
                 >
                   <option value="ranking_singolare">Ranking tennis singolare</option>
-                  <option value="ranking_padel_individuale">Ranking padel individuale</option>
+                  <option value="ranking_padel_individuale">Paitone Arena League</option>
                   <option value="tournament_singolare">Torneo tennis singolare</option>
                   <option value="tournament_padel">Torneo di padel</option>
                 </select>
