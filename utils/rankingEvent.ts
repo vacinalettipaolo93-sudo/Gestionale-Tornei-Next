@@ -6,7 +6,11 @@ import {
   type SummerRankingMasterMatch,
 } from '../types';
 import { DEFAULT_SUMMER_RANKING_RULES, normalizeRulesConfig } from './summerRanking';
-import { DEFAULT_PADEL_INDIVIDUAL_RULES, DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG } from './padelIndividualRanking';
+import {
+  DEFAULT_PADEL_INDIVIDUAL_RULES,
+  DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG,
+  normalizePadelIndividualRulesConfig,
+} from './padelIndividualRanking';
 
 export type RankingEventType = 'ranking_singolare' | 'ranking_padel_individuale';
 
@@ -34,7 +38,7 @@ export const getDefaultRankingRules = (eventType?: Event['eventType'] | null) =>
 
 export const getDefaultRankingRulesConfig = (eventType?: Event['eventType'] | null) =>
   eventType === 'ranking_padel_individuale'
-    ? DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG
+    ? normalizePadelIndividualRulesConfig(DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG)
     : normalizeRulesConfig(undefined);
 
 export const createEmptyRankingData = (eventType?: Event['eventType'] | null): SummerRankingData => ({
@@ -106,7 +110,9 @@ export const normalizeRankingData = (data?: SummerRankingData | null, eventType?
   matches: Array.isArray(data?.matches) ? data!.matches : [],
   participantIds: Array.isArray(data?.participantIds) ? data!.participantIds : [],
   rules: data?.rules ?? getDefaultRankingRules(eventType),
-  rulesConfig: data?.rulesConfig ?? getDefaultRankingRulesConfig(eventType),
+  rulesConfig: eventType === 'ranking_padel_individuale'
+    ? normalizePadelIndividualRulesConfig(data?.rulesConfig)
+    : normalizeRulesConfig(data?.rulesConfig),
   availabilities: data?.availabilities ?? {},
   master: data?.master
     ? {
@@ -132,7 +138,11 @@ export const sanitizeRankingDataForFirestore = (data: SummerRankingData, eventTy
     rules: data.rules ?? getDefaultRankingRules(eventType),
     availabilities: data.availabilities ?? {},
   };
-  if (data.rulesConfig) payload.rulesConfig = data.rulesConfig;
+  if (data.rulesConfig) {
+    payload.rulesConfig = eventType === 'ranking_padel_individuale'
+      ? normalizePadelIndividualRulesConfig(data.rulesConfig)
+      : normalizeRulesConfig(data.rulesConfig);
+  }
   if (data.master) {
     const nextMaster: NonNullable<SummerRankingData['master']> = {};
     nextMaster.format = data.master.format === 'groups' ? 'groups' : 'bracket';

@@ -463,6 +463,7 @@ const App: React.FC = () => {
                                 player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
                               ),
                               rankingData.matches ?? [],
+                              rankingData.rulesConfig,
                             )
                             : calculateSummerRanking(
                               (event.players ?? []).filter(
@@ -592,6 +593,7 @@ const App: React.FC = () => {
                                 player => player.status === 'confirmed' && (rankingData.participantIds ?? []).includes(player.id),
                               ),
                               rankingData.matches ?? [],
+                              rankingData.rulesConfig,
                             )
                             : calculateSummerRanking(
                               (event.players ?? []).filter(

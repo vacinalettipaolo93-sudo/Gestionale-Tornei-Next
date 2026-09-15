@@ -2,13 +2,12 @@ import {
   type Match,
   type PadelIndividualMasterData,
   type Player,
+  type PlayoffBracket,
+  type PlayoffMatch,
   type SummerRankingMasterPair,
+  type SummerRankingMasterMatch,
   type SummerRankingRulesConfig,
 } from '../types';
-import {
-  createSummerRankingMasterBracket,
-  syncSummerRankingMasterMatches,
-} from './summerRanking';
 
 export const PADEL_INDIVIDUAL_RANKING_NAME = 'Paitone Arena League';
 export const PADEL_INDIVIDUAL_EVENT_NAMES = [
@@ -21,6 +20,11 @@ export const PADEL_INDIVIDUAL_MASTER_MIN_MATCHES = 6;
 export const PADEL_INDIVIDUAL_PARTICIPATION_POINTS = 5;
 export const PADEL_INDIVIDUAL_PARTICIPATION_MONTHLY_CAP = 20;
 export const PADEL_INDIVIDUAL_WON_GAMES_CAP = 5;
+const PADEL_INDIVIDUAL_DEFAULT_HEAD_TO_HEAD_LIMIT = 999;
+const normalizeEvenMasterSize = (value: number) => {
+  const normalized = Math.max(2, Math.round(value));
+  return normalized % 2 === 0 ? normalized : normalized + 1;
+};
 
 export const DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG: SummerRankingRulesConfig = {
   diffBandLowMax: 99,
@@ -42,6 +46,7 @@ export const DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG: SummerRankingRulesConfig = {
   drawFixed: 0,
   participationBonusEnabled: true,
   participationBase: PADEL_INDIVIDUAL_PARTICIPATION_POINTS,
+  participationMonthlyCap: PADEL_INDIVIDUAL_PARTICIPATION_MONTHLY_CAP,
   participationWeeklyBonus: 0,
   participationWeeklyMinMatches: 1,
   gameDiffBonusEnabled: false,
@@ -50,32 +55,67 @@ export const DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG: SummerRankingRulesConfig = {
   gameDiffBonus4plus: 0,
   wonGamesBonusEnabled: true,
   wonGamesMultiplier: 1,
+  wonGamesCap: PADEL_INDIVIDUAL_WON_GAMES_CAP,
   inactivityMalusEnabled: false,
   inactivityMalusPoints: 0,
   inactivityMalusDays: 999,
   masterSize: PADEL_INDIVIDUAL_MASTER_SIZE,
   masterMinMatches: PADEL_INDIVIDUAL_MASTER_MIN_MATCHES,
-  headToHeadLimit: 999,
+  headToHeadLimit: PADEL_INDIVIDUAL_DEFAULT_HEAD_TO_HEAD_LIMIT,
 };
 
-export const DEFAULT_PADEL_INDIVIDUAL_RULES = [
-  PADEL_INDIVIDUAL_EVENT_NAMES.join(' / '),
-  '',
-  'Campionato amatoriale di padel individuale senza coppie fisse.',
-  '• Non esistono coppie fisse: ogni giocatore sceglie liberamente compagno e avversari.',
-  '• La classifica è individuale e ogni partita può cambiare il ranking di tutti e 4 i giocatori.',
-  '• Prima di ogni partita si sommano i punteggi delle due coppie: 0-99 equilibrata, 100-199 differenza media, 200+ differenza alta.',
-  '• Punti risultato: equilibrata vincitori +20 / sconfitti -20.',
-  '• Differenza media: favoriti +15 se vincono e -25 se perdono; sfavoriti +25 se vincono e -15 se perdono.',
-  '• Differenza alta: favoriti +10 se vincono e -30 se perdono; sfavoriti +30 se vincono e +10 anche se perdono.',
-  `• Bonus partecipazione: +${PADEL_INDIVIDUAL_PARTICIPATION_POINTS} a partita fino a un massimo di +${PADEL_INDIVIDUAL_PARTICIPATION_MONTHLY_CAP} al mese.`,
-  `• Bonus game: +1 per ogni game vinto, massimo +${PADEL_INDIVIDUAL_WON_GAMES_CAP} per partita e per giocatore.`,
-  `• Master finale: top ${PADEL_INDIVIDUAL_MASTER_SIZE} con almeno ${PADEL_INDIVIDUAL_MASTER_MIN_MATCHES} partite giocate. Le coppie del Master vengono decise dall'organizzazione.`,
-  '• Premi: coppia campione del Master, re del ranking (#1), premio fedeltà (più partite), social player (più compagni diversi).',
-  '',
-  'Scegli il compagno. Scegli gli avversari. Gioca. Vinci per guadagnare punti. Anche ogni game conta.',
-  'NON ESISTONO COPPIE FISSE. LA CLASSIFICA È INDIVIDUALE. OGNI PARTITA PUÒ CAMBIARE IL RANKING.',
-].join('\n');
+export const normalizePadelIndividualRulesConfig = (config?: Partial<SummerRankingRulesConfig> | null): SummerRankingRulesConfig => ({
+  ...DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG,
+  ...config,
+  drawMode: 'fixed',
+  drawPercentage: 0,
+  drawFixed: 0,
+  participationBonusEnabled: config?.participationBonusEnabled ?? DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.participationBonusEnabled,
+  participationBase: Number.isFinite(config?.participationBase) ? Number(config!.participationBase) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.participationBase,
+  participationMonthlyCap: Number.isFinite(config?.participationMonthlyCap) ? Math.max(0, Number(config!.participationMonthlyCap)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.participationMonthlyCap,
+  participationWeeklyBonus: 0,
+  participationWeeklyMinMatches: 1,
+  gameDiffBonusEnabled: false,
+  gameDiffBonus2: 0,
+  gameDiffBonus3: 0,
+  gameDiffBonus4plus: 0,
+  wonGamesBonusEnabled: config?.wonGamesBonusEnabled ?? DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.wonGamesBonusEnabled,
+  wonGamesMultiplier: Number.isFinite(config?.wonGamesMultiplier) ? Math.max(0, Number(config!.wonGamesMultiplier)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.wonGamesMultiplier,
+  wonGamesCap: Number.isFinite(config?.wonGamesCap) ? Math.max(0, Number(config!.wonGamesCap)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.wonGamesCap,
+  inactivityMalusEnabled: false,
+  inactivityMalusPoints: 0,
+  inactivityMalusDays: DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.inactivityMalusDays,
+  masterSize: Number.isFinite(config?.masterSize) ? normalizeEvenMasterSize(Number(config!.masterSize)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.masterSize,
+  masterMinMatches: Number.isFinite(config?.masterMinMatches) ? Math.max(1, Number(config!.masterMinMatches)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.masterMinMatches,
+  headToHeadLimit: Number.isFinite(config?.headToHeadLimit) ? Math.max(1, Number(config!.headToHeadLimit)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.headToHeadLimit,
+});
+
+export const generatePadelIndividualRulesText = (config?: Partial<SummerRankingRulesConfig> | null) => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
+  const lowLabel = `0-${cfg.diffBandLowMax}`;
+  const mediumLabel = `${cfg.diffBandLowMax + 1}-${cfg.diffBandMediumMax}`;
+  const highLabel = `${cfg.diffBandMediumMax + 1}+`;
+  return [
+    PADEL_INDIVIDUAL_EVENT_NAMES.join(' / '),
+    '',
+    'Campionato amatoriale di padel individuale senza coppie fisse.',
+    '• Non esistono coppie fisse: ogni giocatore sceglie liberamente compagno e avversari.',
+    '• La classifica è individuale e ogni partita può cambiare il ranking di tutti e 4 i giocatori.',
+    `• Prima di ogni partita si sommano i punteggi delle due coppie: ${lowLabel} equilibrata, ${mediumLabel} differenza media, ${highLabel} differenza alta.`,
+    `• Partita equilibrata: vincitori ${cfg.favoriteWinLow > 0 ? '+' : ''}${cfg.favoriteWinLow}, sconfitti ${cfg.favoriteLossLow > 0 ? '+' : ''}${cfg.favoriteLossLow}.`,
+    `• Differenza media: favoriti ${cfg.favoriteWinMedium > 0 ? '+' : ''}${cfg.favoriteWinMedium} se vincono e ${cfg.favoriteLossMedium > 0 ? '+' : ''}${cfg.favoriteLossMedium} se perdono; sfavoriti ${cfg.underdogWinMedium > 0 ? '+' : ''}${cfg.underdogWinMedium} se vincono e ${cfg.underdogLossMedium > 0 ? '+' : ''}${cfg.underdogLossMedium} se perdono.`,
+    `• Differenza alta: favoriti ${cfg.favoriteWinHigh > 0 ? '+' : ''}${cfg.favoriteWinHigh} se vincono e ${cfg.favoriteLossHigh > 0 ? '+' : ''}${cfg.favoriteLossHigh} se perdono; sfavoriti ${cfg.underdogWinHigh > 0 ? '+' : ''}${cfg.underdogWinHigh} se vincono e ${cfg.underdogLossHigh > 0 ? '+' : ''}${cfg.underdogLossHigh} se perdono.`,
+    `• Bonus partecipazione: ${cfg.participationBonusEnabled ? `${cfg.participationBase > 0 ? '+' : ''}${cfg.participationBase} a partita fino a un massimo di ${cfg.participationMonthlyCap > 0 ? '+' : ''}${cfg.participationMonthlyCap} al mese.` : 'disattivato.'}`,
+    `• Bonus game: ${cfg.wonGamesBonusEnabled ? `${cfg.wonGamesMultiplier > 0 ? '+' : ''}${cfg.wonGamesMultiplier} per ogni game vinto, massimo ${cfg.wonGamesCap} per partita e per giocatore.` : 'disattivato.'}`,
+    `• Master finale: top ${cfg.masterSize} con almeno ${cfg.masterMinMatches} partite giocate. Le coppie del Master vengono decise dall'organizzazione.`,
+    '• Premi: coppia campione del Master, re del ranking (#1), premio fedeltà (più partite), social player (più compagni diversi).',
+    '',
+    'Scegli il compagno. Scegli gli avversari. Gioca. Vinci per guadagnare punti. Anche ogni game conta.',
+    'NON ESISTONO COPPIE FISSE. LA CLASSIFICA È INDIVIDUALE. OGNI PARTITA PUÒ CAMBIARE IL RANKING.',
+  ].join('\n');
+};
+
+export const DEFAULT_PADEL_INDIVIDUAL_RULES = generatePadelIndividualRulesText(DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG);
 
 export type PadelIndividualDiffBand = 'balanced' | 'medium' | 'high';
 
@@ -184,22 +224,34 @@ const isCompletedPadelIndividualMatch = (match: Match) =>
   && match.score1 !== match.score2
   && (match.status === 'completed' || Boolean(match.completedAt));
 
-export const getPadelIndividualDiffBand = (difference: number): PadelIndividualDiffBand => {
-  if (difference <= 99) return 'balanced';
-  if (difference <= 199) return 'medium';
+export const getPadelIndividualDiffBand = (
+  difference: number,
+  config?: Partial<SummerRankingRulesConfig> | null,
+): PadelIndividualDiffBand => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
+  if (difference <= cfg.diffBandLowMax) return 'balanced';
+  if (difference <= cfg.diffBandMediumMax) return 'medium';
   return 'high';
 };
 
-const getResultPointsForSide = (band: PadelIndividualDiffBand, isFavorite: boolean, won: boolean) => {
+const getResultPointsForSide = (
+  band: PadelIndividualDiffBand,
+  isFavorite: boolean,
+  won: boolean,
+  config?: Partial<SummerRankingRulesConfig> | null,
+) => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
   if (band === 'balanced') {
-    return won ? 20 : -20;
+    return won
+      ? (isFavorite ? cfg.favoriteWinLow : cfg.underdogWinLow)
+      : (isFavorite ? cfg.favoriteLossLow : cfg.underdogLossLow);
   }
   if (band === 'medium') {
-    if (isFavorite) return won ? 15 : -25;
-    return won ? 25 : -15;
+    if (isFavorite) return won ? cfg.favoriteWinMedium : cfg.favoriteLossMedium;
+    return won ? cfg.underdogWinMedium : cfg.underdogLossMedium;
   }
-  if (isFavorite) return won ? 10 : -30;
-  return won ? 30 : 10;
+  if (isFavorite) return won ? cfg.favoriteWinHigh : cfg.favoriteLossHigh;
+  return won ? cfg.underdogWinHigh : cfg.underdogLossHigh;
 };
 
 const getMonthKey = (match: Match) => {
@@ -214,19 +266,29 @@ const getMonthKey = (match: Match) => {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 };
 
-const getParticipantBonus = (monthlyCounts: Map<string, number>, playerId: string, match: Match) => {
+const getParticipantBonus = (
+  monthlyCounts: Map<string, number>,
+  playerId: string,
+  match: Match,
+  config?: Partial<SummerRankingRulesConfig> | null,
+) => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
+  if (!cfg.participationBonusEnabled || cfg.participationBase === 0) return 0;
   const monthKey = `${playerId}:${getMonthKey(match)}`;
   const currentCount = monthlyCounts.get(monthKey) ?? 0;
+  const currentTotal = currentCount * cfg.participationBase;
   monthlyCounts.set(monthKey, currentCount + 1);
-  return currentCount * PADEL_INDIVIDUAL_PARTICIPATION_POINTS >= PADEL_INDIVIDUAL_PARTICIPATION_MONTHLY_CAP
-    ? 0
-    : PADEL_INDIVIDUAL_PARTICIPATION_POINTS;
+  if (cfg.participationMonthlyCap <= 0) return 0;
+  const remainingAllowance = cfg.participationMonthlyCap - currentTotal;
+  if (remainingAllowance <= 0) return 0;
+  return Math.min(cfg.participationBase, remainingAllowance);
 };
 
 export const getPadelIndividualPreMatchInfo = (
   ratingsByPlayer: Map<string, number>,
   team1PlayerIds: string[],
   team2PlayerIds: string[],
+  config?: Partial<SummerRankingRulesConfig> | null,
 ): PadelIndividualPreMatchInfo | null => {
   if (team1PlayerIds.length !== 2 || team2PlayerIds.length !== 2) return null;
   const team1Total = team1PlayerIds.reduce((total, playerId) => total + (ratingsByPlayer.get(playerId) ?? 0), 0);
@@ -236,7 +298,7 @@ export const getPadelIndividualPreMatchInfo = (
     team1Total,
     team2Total,
     difference,
-    band: getPadelIndividualDiffBand(difference),
+    band: getPadelIndividualDiffBand(difference, config),
     favoriteSide: team1Total === team2Total ? null : (team1Total > team2Total ? 1 : 2),
   };
 };
@@ -249,26 +311,28 @@ const buildMatchBreakdown = (
   ratingsByPlayer: Map<string, number>,
   monthlyCounts: Map<string, number>,
   partnerMap: Map<string, Set<string>>,
+  config?: Partial<SummerRankingRulesConfig> | null,
 ): PadelIndividualMatchBreakdown | null => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
   if (!isCompletedPadelIndividualMatch(match)) return null;
   const team1PlayerIds = getPadelIndividualTeamPlayerIds(match, 1);
   const team2PlayerIds = getPadelIndividualTeamPlayerIds(match, 2);
-  const preMatchInfo = getPadelIndividualPreMatchInfo(ratingsByPlayer, team1PlayerIds, team2PlayerIds);
+  const preMatchInfo = getPadelIndividualPreMatchInfo(ratingsByPlayer, team1PlayerIds, team2PlayerIds, cfg);
   if (!preMatchInfo) return null;
 
   const score1 = match.score1 ?? 0;
   const score2 = match.score2 ?? 0;
   const team1Won = score1 > score2;
-  const team1ResultPoints = getResultPointsForSide(preMatchInfo.band, preMatchInfo.favoriteSide === 1, team1Won);
-  const team2ResultPoints = getResultPointsForSide(preMatchInfo.band, preMatchInfo.favoriteSide === 2, !team1Won);
-  const team1WonGamesPoints = Math.min(score1, PADEL_INDIVIDUAL_WON_GAMES_CAP);
-  const team2WonGamesPoints = Math.min(score2, PADEL_INDIVIDUAL_WON_GAMES_CAP);
+  const team1ResultPoints = getResultPointsForSide(preMatchInfo.band, preMatchInfo.favoriteSide === 1, team1Won, cfg);
+  const team2ResultPoints = getResultPointsForSide(preMatchInfo.band, preMatchInfo.favoriteSide === 2, !team1Won, cfg);
+  const team1WonGamesPoints = cfg.wonGamesBonusEnabled && cfg.wonGamesCap > 0 ? Math.min(score1 * cfg.wonGamesMultiplier, cfg.wonGamesCap) : 0;
+  const team2WonGamesPoints = cfg.wonGamesBonusEnabled && cfg.wonGamesCap > 0 ? Math.min(score2 * cfg.wonGamesMultiplier, cfg.wonGamesCap) : 0;
   const playedAt = getMatchPlayedAt(match);
 
   const players = [
     ...team1PlayerIds.map((playerId, index) => {
       const partnerId = team1PlayerIds[index === 0 ? 1 : 0];
-      const participationPoints = getParticipantBonus(monthlyCounts, playerId, match);
+      const participationPoints = getParticipantBonus(monthlyCounts, playerId, match, cfg);
       partnerMap.get(playerId)?.add(partnerId);
       return {
         playerId,
@@ -284,7 +348,7 @@ const buildMatchBreakdown = (
     }),
     ...team2PlayerIds.map((playerId, index) => {
       const partnerId = team2PlayerIds[index === 0 ? 1 : 0];
-      const participationPoints = getParticipantBonus(monthlyCounts, playerId, match);
+      const participationPoints = getParticipantBonus(monthlyCounts, playerId, match, cfg);
       partnerMap.get(playerId)?.add(partnerId);
       return {
         playerId,
@@ -319,7 +383,12 @@ const buildMatchBreakdown = (
   };
 };
 
-export const calculatePadelIndividualMatchBreakdowns = (players: Player[], matches: Match[]) => {
+export const calculatePadelIndividualMatchBreakdowns = (
+  players: Player[],
+  matches: Match[],
+  config?: Partial<SummerRankingRulesConfig> | null,
+) => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
   const confirmedPlayers = players.filter(player => player.status === 'confirmed');
   const ratingsByPlayer = createRatingsMap(confirmedPlayers);
   const monthlyCounts = new Map<string, number>();
@@ -329,14 +398,19 @@ export const calculatePadelIndividualMatchBreakdowns = (players: Player[], match
   sortMatchesByTime(matches)
     .filter(isCompletedPadelIndividualMatch)
     .forEach(match => {
-      const breakdown = buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap);
+      const breakdown = buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap, cfg);
       if (breakdown) breakdowns.set(match.id, breakdown);
     });
 
   return breakdowns;
 };
 
-export const calculatePadelIndividualCurrentRatings = (players: Player[], matches: Match[]) => {
+export const calculatePadelIndividualCurrentRatings = (
+  players: Player[],
+  matches: Match[],
+  config?: Partial<SummerRankingRulesConfig> | null,
+) => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
   const confirmedPlayers = players.filter(player => player.status === 'confirmed');
   const ratingsByPlayer = createRatingsMap(confirmedPlayers);
   const monthlyCounts = new Map<string, number>();
@@ -345,24 +419,35 @@ export const calculatePadelIndividualCurrentRatings = (players: Player[], matche
   sortMatchesByTime(matches)
     .filter(isCompletedPadelIndividualMatch)
     .forEach(match => {
-      buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap);
+      buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap, cfg);
     });
 
   return ratingsByPlayer;
 };
 
-export const calculatePadelIndividualPreMatchRatings = (players: Player[], matches: Match[], targetMatchId?: string) => {
-  const targetMatch = targetMatchId ? matches.find(match => match.id === targetMatchId) : undefined;
-  if (!targetMatchId || !targetMatch) return calculatePadelIndividualCurrentRatings(players, matches);
+export const calculatePadelIndividualPreMatchRatings = (
+  players: Player[],
+  matches: Match[],
+  configOrTargetMatchId?: Partial<SummerRankingRulesConfig> | string | null,
+  targetMatchId?: string,
+) => {
+  const config = typeof configOrTargetMatchId === 'string'
+    ? undefined
+    : configOrTargetMatchId;
+  const effectiveTargetMatchId = typeof configOrTargetMatchId === 'string'
+    ? configOrTargetMatchId
+    : targetMatchId;
+  const targetMatch = effectiveTargetMatchId ? matches.find(match => match.id === effectiveTargetMatchId) : undefined;
+  if (!effectiveTargetMatchId || !targetMatch) return calculatePadelIndividualCurrentRatings(players, matches, config);
 
   const targetTimestamp = toTimestamp(getMatchPlayedAt(targetMatch));
   const filteredMatches = sortMatchesByTime(matches).filter(match => {
-    if (match.id === targetMatchId) return false;
+    if (match.id === effectiveTargetMatchId) return false;
     if (!isCompletedPadelIndividualMatch(match)) return false;
     const matchTimestamp = toTimestamp(getMatchPlayedAt(match));
     if (Number.isNaN(targetTimestamp)) return true;
     if (Number.isNaN(matchTimestamp)) return false;
-    return matchTimestamp < targetTimestamp || (matchTimestamp === targetTimestamp && match.id.localeCompare(targetMatchId) < 0);
+    return matchTimestamp < targetTimestamp || (matchTimestamp === targetTimestamp && match.id.localeCompare(effectiveTargetMatchId) < 0);
   });
 
   const confirmedPlayers = players.filter(player => player.status === 'confirmed');
@@ -370,12 +455,17 @@ export const calculatePadelIndividualPreMatchRatings = (players: Player[], match
   const monthlyCounts = new Map<string, number>();
   const partnerMap = new Map(confirmedPlayers.map(player => [player.id, new Set<string>()]));
   filteredMatches.forEach(match => {
-    buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap);
+    buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap, config);
   });
   return ratingsByPlayer;
 };
 
-export const calculatePadelIndividualRanking = (players: Player[], matches: Match[]): PadelIndividualRankingEntry[] => {
+export const calculatePadelIndividualRanking = (
+  players: Player[],
+  matches: Match[],
+  config?: Partial<SummerRankingRulesConfig> | null,
+): PadelIndividualRankingEntry[] => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
   const confirmedPlayers = players.filter(player => player.status === 'confirmed');
   const stats = new Map(confirmedPlayers.map(player => [player.id, {
     player,
@@ -397,7 +487,7 @@ export const calculatePadelIndividualRanking = (players: Player[], matches: Matc
   sortMatchesByTime(matches)
     .filter(isCompletedPadelIndividualMatch)
     .forEach(match => {
-      const breakdown = buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap);
+      const breakdown = buildMatchBreakdown(match, ratingsByPlayer, monthlyCounts, partnerMap, cfg);
       if (!breakdown) return;
       breakdown.players.forEach(playerBreakdown => {
         const entry = stats.get(playerBreakdown.playerId);
@@ -438,14 +528,14 @@ export const calculatePadelIndividualRanking = (players: Player[], matches: Matc
       wonGamesBonus: entry.wonGamesBonus,
       distinctPartners: entry.distinctPartners,
       qualifiedForMaster: false,
-      eligibleForMaster: entry.matchesPlayed >= PADEL_INDIVIDUAL_MASTER_MIN_MATCHES,
+      eligibleForMaster: entry.matchesPlayed >= cfg.masterMinMatches,
       lastMatchAt: entry.lastMatchAt,
     }));
 
   const autoQualifiedIds = new Set(
     ranking
       .filter(entry => entry.eligibleForMaster)
-      .slice(0, PADEL_INDIVIDUAL_MASTER_SIZE)
+      .slice(0, cfg.masterSize)
       .map(entry => entry.player.id),
   );
 
@@ -455,25 +545,225 @@ export const calculatePadelIndividualRanking = (players: Player[], matches: Matc
   }));
 };
 
-export const getPadelIndividualAutoQualifiedPlayerIds = (ranking: PadelIndividualRankingEntry[]) =>
-  ranking
+export const getPadelIndividualAutoQualifiedPlayerIds = (
+  ranking: PadelIndividualRankingEntry[],
+  config?: Partial<SummerRankingRulesConfig> | null,
+) => {
+  const cfg = normalizePadelIndividualRulesConfig(config);
+  return ranking
     .filter(entry => entry.eligibleForMaster)
-    .slice(0, PADEL_INDIVIDUAL_MASTER_SIZE)
+    .slice(0, cfg.masterSize)
     .map(entry => entry.player.id);
+};
+
+const hasValidKnockoutScore = (match: Pick<PlayoffMatch, 'player1Id' | 'player2Id' | 'score1' | 'score2'>) =>
+  !!match.player1Id
+  && !!match.player2Id
+  && match.score1 !== null
+  && match.score2 !== null
+  && match.score1 >= 0
+  && match.score2 >= 0
+  && match.score1 !== match.score2;
+
+const getWinnerId = (match: Pick<PlayoffMatch, 'player1Id' | 'player2Id' | 'score1' | 'score2'>) => {
+  if (!hasValidKnockoutScore(match)) return null;
+  return (match.score1 ?? 0) > (match.score2 ?? 0) ? match.player1Id : match.player2Id;
+};
+
+const setParticipants = (match: PlayoffMatch, player1Id: string | null, player2Id: string | null) => {
+  const playersChanged = match.player1Id !== player1Id || match.player2Id !== player2Id;
+  match.player1Id = player1Id;
+  match.player2Id = player2Id;
+
+  if (!player1Id || !player2Id || playersChanged) {
+    match.score1 = null;
+    match.score2 = null;
+    match.winnerId = null;
+    return;
+  }
+
+  match.winnerId = getWinnerId(match);
+};
+
+const getNextPowerOfTwo = (value: number) => {
+  let current = 1;
+  while (current < value) current *= 2;
+  return current;
+};
+
+const buildSeedOrder = (size: number): number[] => {
+  if (size <= 1) return [1];
+  const previous = buildSeedOrder(size / 2);
+  return previous.flatMap(seed => [seed, size + 1 - seed]);
+};
+
+const createPadelIndividualMasterBracket = (pairIds: string[]): PlayoffBracket => {
+  const bracketSize = Math.max(2, getNextPowerOfTwo(pairIds.length));
+  const seedOrder = buildSeedOrder(bracketSize);
+  const seededIds = Array.from({ length: bracketSize }, (_, index) => {
+    const seed = seedOrder[index];
+    return pairIds[seed - 1] ?? null;
+  });
+  const totalRounds = Math.log2(bracketSize);
+  const matches: PlayoffMatch[] = [];
+  let matchCounter = 1;
+  let previousRoundIds: string[] = [];
+
+  for (let round = 1; round <= totalRounds; round += 1) {
+    const roundMatchCount = bracketSize / 2 ** round;
+    const currentRoundIds: string[] = [];
+
+    for (let matchIndex = 0; matchIndex < roundMatchCount; matchIndex += 1) {
+      const id = round === totalRounds ? 'master-final' : `padel-master-r${round}-m${matchIndex + 1}`;
+      currentRoundIds.push(id);
+      const nextMatchId = round === totalRounds ? null : (round + 1 === totalRounds ? 'master-final' : `padel-master-r${round + 1}-m${Math.floor(matchIndex / 2) + 1}`);
+      matches.push({
+        id,
+        round,
+        matchIndex: matchCounter - 1,
+        player1Id: round === 1 ? seededIds[matchIndex * 2] ?? null : null,
+        player2Id: round === 1 ? seededIds[matchIndex * 2 + 1] ?? null : null,
+        score1: null,
+        score2: null,
+        winnerId: null,
+        nextMatchId,
+      });
+      matchCounter += 1;
+    }
+
+    previousRoundIds = currentRoundIds;
+  }
+
+  return recomputePadelIndividualMasterBracket({
+    matches,
+    isGenerated: true,
+    finalId: previousRoundIds[0] ?? 'master-final',
+    bronzeFinalId: null,
+  });
+};
+
+export const recomputePadelIndividualMasterBracket = (bracket: PlayoffBracket): PlayoffBracket => {
+  const nextBracket: PlayoffBracket = {
+    ...bracket,
+    matches: bracket.matches.map(match => ({ ...match })),
+  };
+  const orderedMatches = nextBracket.matches.slice().sort((left, right) => left.round - right.round || left.matchIndex - right.matchIndex);
+  const matchMap = new Map(orderedMatches.map(match => [match.id, match]));
+
+  orderedMatches.forEach(match => {
+    match.winnerId = getWinnerId(match);
+  });
+
+  const matchesByRound = orderedMatches.reduce<Map<number, PlayoffMatch[]>>((acc, match) => {
+    acc.set(match.round, [...(acc.get(match.round) ?? []), match]);
+    return acc;
+  }, new Map());
+
+  Array.from(matchesByRound.keys()).sort((a, b) => a - b).forEach(round => {
+    if (round === 1) return;
+    const currentMatches = matchesByRound.get(round) ?? [];
+    currentMatches.forEach(match => {
+      const feeders = orderedMatches
+        .filter(candidate => candidate.nextMatchId === match.id)
+        .sort((left, right) => left.matchIndex - right.matchIndex);
+      setParticipants(match, feeders[0]?.winnerId ?? null, feeders[1]?.winnerId ?? null);
+    });
+  });
+
+  orderedMatches.forEach(match => {
+    if (match.player1Id && !match.player2Id && !hasValidKnockoutScore(match)) {
+      match.winnerId = match.player1Id;
+    }
+    if (!match.player1Id && match.player2Id && !hasValidKnockoutScore(match)) {
+      match.winnerId = match.player2Id;
+    }
+  });
+
+  Array.from(matchesByRound.keys()).sort((a, b) => a - b).forEach(round => {
+    if (round === 1) return;
+    const currentMatches = matchesByRound.get(round) ?? [];
+    currentMatches.forEach(match => {
+      const feeders = orderedMatches
+        .filter(candidate => candidate.nextMatchId === match.id)
+        .sort((left, right) => left.matchIndex - right.matchIndex);
+      setParticipants(match, feeders[0]?.winnerId ?? null, feeders[1]?.winnerId ?? null);
+    });
+  });
+
+  const finalMatch = orderedMatches[orderedMatches.length - 1];
+  nextBracket.finalId = finalMatch?.id ?? nextBracket.finalId;
+  nextBracket.bronzeFinalId = null;
+  if (matchMap.size === 0) return nextBracket;
+  return nextBracket;
+};
+
+const getPadelIndividualMatchLabel = (match: PlayoffMatch, maxRound: number) => {
+  if (match.round === maxRound) return 'Finale';
+  if (match.round === maxRound - 1) return `Semifinale ${match.matchIndex + 1}`;
+  if (match.round === maxRound - 2) return `Quarto ${match.matchIndex + 1}`;
+  if (match.round === 1) return `Turno ${match.matchIndex + 1}`;
+  return `Round ${match.round} • Match ${match.matchIndex + 1}`;
+};
+
+const getPadelIndividualMatchStage = (match: PlayoffMatch, maxRound: number): SummerRankingMasterMatch['stage'] => {
+  if (match.round === maxRound) return 'final';
+  if (match.round === maxRound - 1) return 'semifinal';
+  return 'quarterfinal';
+};
+
+export const syncPadelIndividualMasterMatches = (
+  bracket: PlayoffBracket,
+  previousMatches: SummerRankingMasterMatch[] = [],
+  completedAtFallback = new Date().toISOString(),
+): SummerRankingMasterMatch[] => {
+  const previousMap = new Map(previousMatches.map(match => [match.id, match]));
+  const maxRound = bracket.matches.reduce((max, match) => Math.max(max, match.round), 1);
+
+  return bracket.matches
+    .slice()
+    .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex)
+    .map((match, index) => {
+      const previousMatch = previousMap.get(match.id);
+      const samePlayers = previousMatch?.player1Id === match.player1Id && previousMatch?.player2Id === match.player2Id;
+      const isCompleted = hasValidKnockoutScore(match);
+      return {
+        id: match.id,
+        round: match.round,
+        label: previousMatch?.label ?? getPadelIndividualMatchLabel({ ...match, matchIndex: match.round === maxRound ? 0 : index }, maxRound),
+        stage: previousMatch?.stage ?? getPadelIndividualMatchStage(match, maxRound),
+        player1Id: match.player1Id,
+        player2Id: match.player2Id,
+        score1: isCompleted ? match.score1 : null,
+        score2: isCompleted ? match.score2 : null,
+        status: isCompleted
+          ? 'completed'
+          : samePlayers && previousMatch?.slotId && match.player1Id && match.player2Id
+            ? 'scheduled'
+            : 'pending',
+        scheduledTime: samePlayers ? previousMatch?.scheduledTime : undefined,
+        location: samePlayers ? previousMatch?.location : undefined,
+        field: samePlayers ? previousMatch?.field : undefined,
+        slotId: samePlayers ? previousMatch?.slotId : undefined,
+        completedAt: isCompleted ? previousMatch?.completedAt ?? completedAtFallback : undefined,
+      };
+    });
+};
 
 export const createPadelIndividualMasterData = (
   qualifiedPlayerIds: string[],
   pairs: SummerRankingMasterPair[],
+  config?: Partial<SummerRankingRulesConfig> | null,
 ): PadelIndividualMasterData | null => {
-  if (qualifiedPlayerIds.length !== PADEL_INDIVIDUAL_MASTER_SIZE || pairs.length !== PADEL_INDIVIDUAL_MASTER_SIZE / 2) {
+  const cfg = normalizePadelIndividualRulesConfig(config);
+  if (cfg.masterSize % 2 !== 0 || qualifiedPlayerIds.length !== cfg.masterSize || pairs.length !== cfg.masterSize / 2) {
     return null;
   }
-  const bracket = createSummerRankingMasterBracket(pairs.map(pair => pair.id));
+  const bracket = createPadelIndividualMasterBracket(pairs.map(pair => pair.id));
   return {
     qualifiedPlayerIds,
     pairs,
     bracket,
-    matches: syncSummerRankingMasterMatches(bracket),
+    matches: syncPadelIndividualMasterMatches(bracket),
     generatedAt: new Date().toISOString(),
   };
 };
@@ -512,6 +802,7 @@ const getChampionPairId = (master?: PadelIndividualMasterData) => {
 export const calculatePadelIndividualAwards = (
   ranking: PadelIndividualRankingEntry[],
   master?: PadelIndividualMasterData,
+  _config?: Partial<SummerRankingRulesConfig> | null,
 ): PadelIndividualAwards => {
   const fidelityTop = ranking.reduce((max, entry) => Math.max(max, entry.matchesPlayed), 0);
   const socialTop = ranking.reduce((max, entry) => Math.max(max, entry.distinctPartners), 0);

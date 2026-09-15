@@ -230,6 +230,7 @@ export interface SummerRankingRulesConfig {
 
   participationBonusEnabled: boolean;
   participationBase: number;
+  participationMonthlyCap: number;
   participationWeeklyBonus: number;
   participationWeeklyMinMatches: number;
 
@@ -240,6 +241,7 @@ export interface SummerRankingRulesConfig {
 
   wonGamesBonusEnabled: boolean;
   wonGamesMultiplier: number;
+  wonGamesCap: number;
 
   inactivityMalusEnabled: boolean;
   inactivityMalusPoints: number;

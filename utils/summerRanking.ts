@@ -38,6 +38,7 @@ export const DEFAULT_RULES_CONFIG: SummerRankingRulesConfig = {
 
   participationBonusEnabled: true,
   participationBase: 5,
+  participationMonthlyCap: 0,
   participationWeeklyBonus: 10,
   participationWeeklyMinMatches: 2,
 
@@ -48,6 +49,7 @@ export const DEFAULT_RULES_CONFIG: SummerRankingRulesConfig = {
 
   wonGamesBonusEnabled: true,
   wonGamesMultiplier: 1,
+  wonGamesCap: 0,
 
   inactivityMalusEnabled: true,
   inactivityMalusPoints: 5,
@@ -66,7 +68,9 @@ export const normalizeRulesConfig = (config?: Partial<SummerRankingRulesConfig> 
   participationBonusEnabled: config?.participationBonusEnabled ?? DEFAULT_RULES_CONFIG.participationBonusEnabled,
   gameDiffBonusEnabled: config?.gameDiffBonusEnabled ?? DEFAULT_RULES_CONFIG.gameDiffBonusEnabled,
   wonGamesBonusEnabled: config?.wonGamesBonusEnabled ?? DEFAULT_RULES_CONFIG.wonGamesBonusEnabled,
-  wonGamesMultiplier: (config?.wonGamesMultiplier === 1 || config?.wonGamesMultiplier === 2) ? config.wonGamesMultiplier : DEFAULT_RULES_CONFIG.wonGamesMultiplier,
+  wonGamesMultiplier: Number.isFinite(config?.wonGamesMultiplier) ? Number(config!.wonGamesMultiplier) : DEFAULT_RULES_CONFIG.wonGamesMultiplier,
+  participationMonthlyCap: Number.isFinite(config?.participationMonthlyCap) ? Math.max(0, Number(config!.participationMonthlyCap)) : DEFAULT_RULES_CONFIG.participationMonthlyCap,
+  wonGamesCap: Number.isFinite(config?.wonGamesCap) ? Math.max(0, Number(config!.wonGamesCap)) : DEFAULT_RULES_CONFIG.wonGamesCap,
   inactivityMalusEnabled: config?.inactivityMalusEnabled ?? DEFAULT_RULES_CONFIG.inactivityMalusEnabled,
 });
 
@@ -87,7 +91,7 @@ export const generateRulesText = (config: SummerRankingRulesConfig): string => {
     `• Pareggio: ${drawDesc}. Ai game fatti in partita si aggiungono al punteggio base.`,
   ];
   if (config.wonGamesBonusEnabled) {
-    const mult = config.wonGamesMultiplier === 2 ? 'doppi (×2)' : 'normali (×1)';
+    const mult = config.wonGamesMultiplier === 2 ? 'doppi (×2)' : config.wonGamesMultiplier === 1 ? 'normali (×1)' : `personalizzati (×${config.wonGamesMultiplier})`;
     lines.push(`• Bonus game fatti: i game fatti dal vincitore si sommano ai punti vittoria (${mult}); i game dello sconfitto riducono la penalità dello stesso importo (min. 0 perdita).`);
   }
   if (config.participationBonusEnabled) {
