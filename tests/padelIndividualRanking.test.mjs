@@ -34,6 +34,7 @@ const padelModuleUrl = pathToFileURL(path.join(tempDir, 'utils/padelIndividualRa
 const {
   calculatePadelIndividualMatchBreakdowns,
   calculatePadelIndividualRanking,
+  createPadelIndividualMasterData,
   getPadelIndividualAutoQualifiedPlayerIds,
   normalizePadelIndividualRulesConfig,
 } = await import(padelModuleUrl);
@@ -282,4 +283,26 @@ test('custom master settings drive qualification cutoff and minimum matches', ()
   const qualifiedIds = getPadelIndividualAutoQualifiedPlayerIds(rankingEntries, config);
 
   assert.deepEqual(qualifiedIds, ['p1', 'p2', 'p3', 'p5']);
+});
+
+test('custom master size generates a valid reduced master bracket', () => {
+  const config = normalizePadelIndividualRulesConfig({ masterSize: 8 });
+  const qualifiedPlayerIds = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'];
+  const pairs = [
+    { id: 'pair-1', player1Id: 'p1', player2Id: 'p2' },
+    { id: 'pair-2', player1Id: 'p3', player2Id: 'p4' },
+    { id: 'pair-3', player1Id: 'p5', player2Id: 'p6' },
+    { id: 'pair-4', player1Id: 'p7', player2Id: 'p8' },
+  ];
+
+  const master = createPadelIndividualMasterData(qualifiedPlayerIds, pairs, config);
+
+  assert.equal(master.qualifiedPlayerIds.length, 8);
+  assert.equal(master.pairs.length, 4);
+  assert.equal(master.bracket.finalId, 'master-final');
+  assert.equal(master.matches.length, 3);
+  assert.deepEqual(master.matches.slice(0, 2).map(match => [match.player1Id, match.player2Id]), [
+    ['pair-1', 'pair-4'],
+    ['pair-2', 'pair-3'],
+  ]);
 });

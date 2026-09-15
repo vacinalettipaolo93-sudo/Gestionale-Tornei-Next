@@ -1163,6 +1163,8 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                             ['unavailable', 'Non disponibile'],
                           ] as const).map(([value, label]) => (
                             <button
+                              type="button"
+                              aria-pressed={availabilityForm.draft.status === value}
                               key={value}
                               onClick={() => setAvailabilityForm(previous => ({
                                 ...previous,
@@ -1191,6 +1193,8 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                         <div className="flex flex-wrap gap-2">
                           {AVAILABILITY_DAYS.map(day => (
                             <button
+                              type="button"
+                              aria-pressed={availabilityForm.draft.days.includes(day.value)}
                               key={day.value}
                               onClick={() => setAvailabilityForm(previous => ({
                                 ...previous,
@@ -1217,6 +1221,8 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                           <div className="flex flex-wrap gap-2">
                             {AVAILABILITY_PERIODS.map(period => (
                               <button
+                                type="button"
+                                aria-pressed={availabilityForm.draft.periods.includes(period.value)}
                                 key={period.value}
                                 onClick={() => setAvailabilityForm(previous => ({
                                   ...previous,
@@ -1465,7 +1471,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                   <div className="text-sm font-semibold text-text-primary">Bonus partecipazione</div>
                   <div className="text-xs text-text-secondary">Punti a presenza e limite mensile.</div>
                 </div>
-                <button onClick={() => toggleRulesConfigFlag('participationBonusEnabled')} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rulesConfigForm.participationBonusEnabled ? 'bg-accent' : 'bg-tertiary'}`}>
+                <button type="button" aria-pressed={rulesConfigForm.participationBonusEnabled} onClick={() => toggleRulesConfigFlag('participationBonusEnabled')} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rulesConfigForm.participationBonusEnabled ? 'bg-accent' : 'bg-tertiary'}`}>
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rulesConfigForm.participationBonusEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>
               </div>
@@ -1487,7 +1493,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                   <div className="text-sm font-semibold text-text-primary">Bonus game</div>
                   <div className="text-xs text-text-secondary">Punti per game vinto e massimo per partita.</div>
                 </div>
-                <button onClick={() => toggleRulesConfigFlag('wonGamesBonusEnabled')} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rulesConfigForm.wonGamesBonusEnabled ? 'bg-accent' : 'bg-tertiary'}`}>
+                <button type="button" aria-pressed={rulesConfigForm.wonGamesBonusEnabled} onClick={() => toggleRulesConfigFlag('wonGamesBonusEnabled')} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rulesConfigForm.wonGamesBonusEnabled ? 'bg-accent' : 'bg-tertiary'}`}>
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rulesConfigForm.wonGamesBonusEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>
               </div>

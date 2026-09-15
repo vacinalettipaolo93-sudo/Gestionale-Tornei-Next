@@ -21,6 +21,10 @@ export const PADEL_INDIVIDUAL_PARTICIPATION_POINTS = 5;
 export const PADEL_INDIVIDUAL_PARTICIPATION_MONTHLY_CAP = 20;
 export const PADEL_INDIVIDUAL_WON_GAMES_CAP = 5;
 const PADEL_INDIVIDUAL_DEFAULT_HEAD_TO_HEAD_LIMIT = 999;
+const normalizeEvenMasterSize = (value: number) => {
+  const normalized = Math.max(2, Math.round(value));
+  return normalized % 2 === 0 ? normalized : normalized + 1;
+};
 
 export const DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG: SummerRankingRulesConfig = {
   diffBandLowMax: 99,
@@ -81,7 +85,7 @@ export const normalizePadelIndividualRulesConfig = (config?: Partial<SummerRanki
   inactivityMalusEnabled: false,
   inactivityMalusPoints: 0,
   inactivityMalusDays: DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.inactivityMalusDays,
-  masterSize: Number.isFinite(config?.masterSize) ? Math.max(2, Number(config!.masterSize)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.masterSize,
+  masterSize: Number.isFinite(config?.masterSize) ? normalizeEvenMasterSize(Number(config!.masterSize)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.masterSize,
   masterMinMatches: Number.isFinite(config?.masterMinMatches) ? Math.max(1, Number(config!.masterMinMatches)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.masterMinMatches,
   headToHeadLimit: Number.isFinite(config?.headToHeadLimit) ? Math.max(1, Number(config!.headToHeadLimit)) : DEFAULT_PADEL_INDIVIDUAL_RULES_CONFIG.headToHeadLimit,
 });
