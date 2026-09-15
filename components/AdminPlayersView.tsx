@@ -2,11 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, addDoc, deleteDoc, doc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { type Event, type Player, type SummerRankingData } from '../types';
-import {
-  generateRulesText,
-  normalizeRulesConfig,
-  removePlayerFromSummerRankingMaster,
-} from '../utils/summerRanking';
+import { removePlayerFromPadelIndividualMaster } from '../utils/padelIndividualRanking';
+import { removePlayerFromSummerRankingMaster } from '../utils/summerRanking';
+import { matchIncludesPlayer, normalizeRankingData, sanitizeRankingDataForFirestore } from '../utils/rankingEvent';
 import { createInitialsAvatar } from '../utils/avatar';
 
 interface AdminPlayersViewProps {
@@ -15,41 +13,6 @@ interface AdminPlayersViewProps {
   rankingEvent: Event;
   setEvents: React.Dispatch<React.SetStateAction<Event[]>>;
 }
-
-const normalizeEventRankingData = (data?: SummerRankingData): SummerRankingData => ({
-  slots: Array.isArray(data?.slots) ? data.slots : [],
-  matches: Array.isArray(data?.matches) ? data.matches : [],
-  participantIds: Array.isArray(data?.participantIds) ? data.participantIds : [],
-  rules: data?.rules ?? generateRulesText(normalizeRulesConfig(data?.rulesConfig)),
-  rulesConfig: data?.rulesConfig,
-  availabilities: data?.availabilities ?? {},
-  master: data?.master,
-});
-
-const sanitizeRankingDataForFirestore = (data: SummerRankingData): SummerRankingData => {
-  const payload: SummerRankingData = {
-    slots: Array.isArray(data.slots) ? data.slots : [],
-    matches: Array.isArray(data.matches) ? data.matches : [],
-    participantIds: Array.isArray(data.participantIds) ? Array.from(new Set(data.participantIds)) : [],
-    rules: data.rules ?? generateRulesText(normalizeRulesConfig(data.rulesConfig)),
-    availabilities: data.availabilities ?? {},
-  };
-
-  if (data.rulesConfig) payload.rulesConfig = data.rulesConfig;
-  if (data.master) {
-    const nextMaster: NonNullable<SummerRankingData['master']> = {};
-    nextMaster.format = data.master.format === 'groups' || (Array.isArray(data.master.groups) && data.master.groups.length > 0) ? 'groups' : 'bracket';
-    if (Array.isArray(data.master.manualQualifiedPlayerIds)) nextMaster.manualQualifiedPlayerIds = data.master.manualQualifiedPlayerIds;
-    if (Array.isArray(data.master.generatedQualifiedPlayerIds)) nextMaster.generatedQualifiedPlayerIds = data.master.generatedQualifiedPlayerIds;
-    if (data.master.bracket !== undefined) nextMaster.bracket = data.master.bracket;
-    if (Array.isArray(data.master.groups)) nextMaster.groups = data.master.groups;
-    if (Array.isArray(data.master.matches)) nextMaster.matches = data.master.matches;
-    if (data.master.generatedAt !== undefined) nextMaster.generatedAt = data.master.generatedAt;
-    payload.master = nextMaster;
-  }
-
-  return payload;
-};
 
 const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
   players,
@@ -84,8 +47,8 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
     return sortedPlayers.filter(player => player.name.toLowerCase().includes(query));
   }, [playerSearchQuery, sortedPlayers]);
   const rankingData = useMemo<SummerRankingData>(
-    () => normalizeEventRankingData(rankingEvent.rankingData),
-    [rankingEvent.rankingData],
+    () => normalizeRankingData(rankingEvent.rankingData, rankingEvent.eventType),
+    [rankingEvent.eventType, rankingEvent.rankingData],
   );
   const rankingParticipantIds = useMemo(
     () => Array.isArray(rankingData.participantIds) ? rankingData.participantIds : [],
@@ -97,7 +60,7 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
   );
   const addPlayerToRankingEvent = async (player: Player, startPoints: number) => {
     const event = events.find(item => item.id === rankingEvent.id) ?? rankingEvent;
-    const currentRankingData = normalizeEventRankingData(event.rankingData ?? rankingData);
+    const currentRankingData = normalizeRankingData(event.rankingData ?? rankingData, event.eventType);
     const participantIds = Array.from(new Set([...(currentRankingData.participantIds ?? []), player.id]));
     const existingEventPlayer = event.players.find(existing => existing.id === player.id);
     const alreadyInEventPlayers = Boolean(existingEventPlayer);
@@ -119,9 +82,9 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
       participantIds,
     };
     const eventPayload = {
-      eventType: 'ranking_singolare' as const,
+      eventType: rankingEvent.eventType,
       players: nextPlayers,
-      rankingData: sanitizeRankingDataForFirestore(nextRankingData),
+      rankingData: sanitizeRankingDataForFirestore(nextRankingData, rankingEvent.eventType),
     };
 
     const batch = writeBatch(db);
@@ -147,7 +110,7 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
 
   const addPlayerToRanking = async (player: Player, startPoints: number) => {
     const event = events.find(item => item.id === rankingEvent.id) ?? rankingEvent;
-    const currentRankingData = normalizeEventRankingData(event.rankingData ?? rankingData);
+    const currentRankingData = normalizeRankingData(event.rankingData ?? rankingData, event.eventType);
     const currentParticipantSet = new Set(currentRankingData.participantIds);
     if (currentParticipantSet.has(player.id) && event.players.some(existing => existing.id === player.id)) {
       setFeedback({ type: 'success', message: `${player.name} è già nel ranking.` });
@@ -414,7 +377,7 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
       await Promise.all(linkedUsersSnap.docs.map(userDoc => deleteDoc(userDoc.ref)));
       await deleteDoc(doc(db, 'players', player.id));
 
-      const eventsToPersist: Array<{ id: string; players: Player[]; rankingData?: SummerRankingData }> = [];
+      const eventsToPersist: Array<{ id: string; players: Player[]; rankingData?: SummerRankingData; eventType?: Event['eventType'] }> = [];
       const localUpdatesByEventId = new Map<string, { players: Player[]; rankingData?: SummerRankingData }>();
 
       for (const event of events) {
@@ -426,7 +389,7 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
         const removedFromParticipantIds = participantIds !== undefined
           && participantIds.length !== (event.rankingData?.participantIds?.length ?? 0);
         const nextMatches = Array.isArray(event.rankingData?.matches)
-          ? event.rankingData.matches.filter(match => match.player1Id !== player.id && match.player2Id !== player.id)
+          ? event.rankingData.matches.filter(match => !matchIncludesPlayer(match, player.id))
           : [];
         const removedFromMatches = Array.isArray(event.rankingData?.matches)
           && nextMatches.length !== event.rankingData.matches.length;
@@ -434,8 +397,10 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
         const hadAvailability = player.id in nextAvailabilities;
         delete nextAvailabilities[player.id];
         const nextMaster = removePlayerFromSummerRankingMaster(event.rankingData?.master, player.id);
+        const nextPadelIndividualMaster = removePlayerFromPadelIndividualMaster(event.rankingData?.padelIndividualMaster, player.id);
         const removedFromMaster = nextMaster !== event.rankingData?.master;
-        const rankingChanged = removedFromParticipantIds || removedFromMatches || hadAvailability || removedFromMaster;
+        const removedFromPadelMaster = nextPadelIndividualMaster !== event.rankingData?.padelIndividualMaster;
+        const rankingChanged = removedFromParticipantIds || removedFromMatches || hadAvailability || removedFromMaster || removedFromPadelMaster;
 
         if (!removedFromPlayers && !rankingChanged) continue;
 
@@ -446,11 +411,12 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
             matches: nextMatches,
             availabilities: nextAvailabilities,
             master: nextMaster,
+            padelIndividualMaster: nextPadelIndividualMaster,
           }
           : undefined;
 
         localUpdatesByEventId.set(event.id, { players: nextPlayers, rankingData: nextRankingData });
-        eventsToPersist.push({ id: event.id, players: nextPlayers, rankingData: nextRankingData });
+        eventsToPersist.push({ id: event.id, players: nextPlayers, rankingData: nextRankingData, eventType: event.eventType });
       }
 
       setEvents(prev =>
@@ -469,7 +435,7 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
         eventsToPersist.map(event =>
           updateDoc(doc(db, 'events', event.id), {
             players: event.players,
-            ...(event.rankingData ? { rankingData: event.rankingData } : {}),
+            ...(event.rankingData ? { rankingData: sanitizeRankingDataForFirestore(event.rankingData, event.eventType) } : {}),
           }),
         ),
       );

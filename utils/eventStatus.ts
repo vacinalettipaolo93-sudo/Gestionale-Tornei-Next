@@ -43,12 +43,12 @@ export function isTournamentConcluded(tournament: Tournament): boolean {
 
 /**
  * Determines if an event is concluded.
- * - For ranking_singolare: always false (kept "In corso" by default)
+ * - For ranking_singolare / ranking_padel_individuale: always false (kept "In corso" by default)
  * - For tournament_singolare: the event must have at least one tournament
  *   and all its tournaments must be concluded.
  */
 export function isEventConcluded(event: Event): boolean {
-  if (event.eventType === 'ranking_singolare') {
+  if (event.eventType === 'ranking_singolare' || event.eventType === 'ranking_padel_individuale') {
     return false;
   }
 

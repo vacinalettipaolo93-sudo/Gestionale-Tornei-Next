@@ -20,6 +20,9 @@ export interface Match {
   field?: string;
   slotId?: string;
   completedAt?: string;
+  monthKey?: string;
+  team1PlayerIds?: string[];
+  team2PlayerIds?: string[];
 }
 
 export interface Group {
@@ -116,7 +119,7 @@ export interface Event {
   tournaments: Tournament[];
   players: Player[];
   invitationCode: string;
-  eventType?: 'ranking_singolare' | 'tournament_singolare' | 'tournament_padel';
+  eventType?: 'ranking_singolare' | 'ranking_padel_individuale' | 'tournament_singolare' | 'tournament_padel';
   rankingData?: SummerRankingData;
   globalTimeSlots?: TimeSlot[];
   rules?: string;
@@ -175,6 +178,20 @@ export interface SummerRankingMasterMatch {
   field?: string;
   slotId?: string;
   completedAt?: string;
+}
+
+export interface SummerRankingMasterPair {
+  id: string;
+  player1Id: string;
+  player2Id: string;
+}
+
+export interface PadelIndividualMasterData {
+  qualifiedPlayerIds: string[];
+  pairs: SummerRankingMasterPair[];
+  bracket?: PlayoffBracket | null;
+  matches?: SummerRankingMasterMatch[];
+  generatedAt?: string;
 }
 
 export interface SummerRankingMasterData {
@@ -242,6 +259,7 @@ export interface SummerRankingData {
   rulesConfig?: SummerRankingRulesConfig;
   availabilities?: Record<string, SummerPlayerAvailability>;
   master?: SummerRankingMasterData;
+  padelIndividualMaster?: PadelIndividualMasterData;
 }
 
 export interface StandingsEntry {
