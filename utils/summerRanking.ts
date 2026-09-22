@@ -72,6 +72,9 @@ export const normalizeRulesConfig = (config?: Partial<SummerRankingRulesConfig> 
   participationMonthlyCap: Number.isFinite(config?.participationMonthlyCap) ? Math.max(0, Number(config!.participationMonthlyCap)) : DEFAULT_RULES_CONFIG.participationMonthlyCap,
   wonGamesCap: Number.isFinite(config?.wonGamesCap) ? Math.max(0, Number(config!.wonGamesCap)) : DEFAULT_RULES_CONFIG.wonGamesCap,
   inactivityMalusEnabled: config?.inactivityMalusEnabled ?? DEFAULT_RULES_CONFIG.inactivityMalusEnabled,
+  masterSize: Number.isFinite(config?.masterSize) ? Math.max(1, Math.floor(Number(config!.masterSize))) : DEFAULT_RULES_CONFIG.masterSize,
+  masterMinMatches: Number.isFinite(config?.masterMinMatches) ? Math.max(0, Math.floor(Number(config!.masterMinMatches))) : DEFAULT_RULES_CONFIG.masterMinMatches,
+  headToHeadLimit: Number.isFinite(config?.headToHeadLimit) ? Math.max(1, Math.floor(Number(config!.headToHeadLimit))) : DEFAULT_RULES_CONFIG.headToHeadLimit,
 });
 
 export const generateRulesText = (config: SummerRankingRulesConfig): string => {
@@ -155,13 +158,6 @@ export interface SummerRankingMatchBreakdown {
 
 const getStartingPoints = (player: Player) => Number(player.summerRankingStartPoints ?? 0);
 
-const MASTER_SEED_PAIRINGS: Array<[number, number]> = [
-  [0, 7],
-  [1, 6],
-  [2, 5],
-  [3, 4],
-];
-
 const MASTER_GROUP_CONFIGS: Array<{ id: string; name: string; seeds: number[] }> = [
   { id: 'master-group-a', name: 'Girone A', seeds: [0, 3, 4, 7] },
   { id: 'master-group-b', name: 'Girone B', seeds: [1, 2, 5, 6] },
@@ -176,16 +172,27 @@ const MASTER_GROUP_PAIRINGS: Array<[number, number]> = [
   [1, 2],
 ];
 
-const MASTER_MATCH_METADATA = {
-  'master-qf-1': { label: 'Quarto 1', stage: 'quarterfinal' },
-  'master-qf-2': { label: 'Quarto 2', stage: 'quarterfinal' },
-  'master-qf-3': { label: 'Quarto 3', stage: 'quarterfinal' },
-  'master-qf-4': { label: 'Quarto 4', stage: 'quarterfinal' },
-  'master-sf-1': { label: 'Semifinale 1', stage: 'semifinal' },
-  'master-sf-2': { label: 'Semifinale 2', stage: 'semifinal' },
-  'master-final': { label: 'Finale', stage: 'final' },
-  'master-third': { label: 'Finale 3°/4° posto', stage: 'thirdPlace' },
-} as const satisfies Record<string, { label: string; stage: SummerRankingMasterMatch['stage'] }>;
+const getStandardSeedOrder = (size: number): number[] => {
+  if (size <= 1) return [1];
+  if (size === 2) return [1, 2];
+
+  let order = [1, 2];
+  while (order.length < size) {
+    const nextSize = order.length * 2;
+    order = order.flatMap(seed => [seed, nextSize + 1 - seed]);
+  }
+  return order;
+};
+
+const getMasterMatchStage = (
+  match: Pick<PlayoffMatch, 'round' | 'isBronzeFinal'>,
+  maxRound: number,
+): SummerRankingMasterMatch['stage'] => {
+  if (match.isBronzeFinal) return 'thirdPlace';
+  if (match.round >= maxRound) return 'final';
+  if (match.round === maxRound - 1) return 'semifinal';
+  return 'quarterfinal';
+};
 
 export const getSummerRankingDiffBand = (diff: number, config?: SummerRankingRulesConfig) => {
   const cfg = config ?? DEFAULT_RULES_CONFIG;
@@ -272,8 +279,13 @@ export const getSummerRankingMasterQualifiedPlayerIds = (
   config?: SummerRankingRulesConfig,
 ) => {
   const cfg = config ?? DEFAULT_RULES_CONFIG;
+  const rankingPlayerIds = new Set(ranking.map(entry => entry.player.id));
   const manualQualified = Array.isArray(master?.manualQualifiedPlayerIds)
-    ? master!.manualQualifiedPlayerIds.filter(Boolean)
+    ? master!.manualQualifiedPlayerIds.reduce<string[]>((acc, playerId) => {
+      if (!playerId || acc.includes(playerId) || !rankingPlayerIds.has(playerId)) return acc;
+      acc.push(playerId);
+      return acc;
+    }, [])
     : [];
 
   return manualQualified.length === cfg.masterSize
@@ -285,90 +297,74 @@ export const getSummerRankingMasterFormat = (master?: SummerRankingMasterData): 
   master?.format === 'groups' || (Array.isArray(master?.groups) && master.groups.length > 0) ? 'groups' : 'bracket';
 
 export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): PlayoffBracket => {
-  const matches: PlayoffMatch[] = [
-    {
-      id: 'master-qf-1',
-      round: 1,
-      matchIndex: 0,
-      player1Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[0][0]] ?? null,
-      player2Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[0][1]] ?? null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: 'master-sf-1',
-    },
-    {
-      id: 'master-qf-2',
-      round: 1,
-      matchIndex: 1,
-      player1Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[1][0]] ?? null,
-      player2Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[1][1]] ?? null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: 'master-sf-1',
-    },
-    {
-      id: 'master-qf-3',
-      round: 1,
-      matchIndex: 2,
-      player1Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[2][0]] ?? null,
-      player2Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[2][1]] ?? null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: 'master-sf-2',
-    },
-    {
-      id: 'master-qf-4',
-      round: 1,
-      matchIndex: 3,
-      player1Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[3][0]] ?? null,
-      player2Id: qualifiedPlayerIds[MASTER_SEED_PAIRINGS[3][1]] ?? null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: 'master-sf-2',
-    },
-    {
-      id: 'master-sf-1',
-      round: 2,
-      matchIndex: 4,
-      player1Id: null,
-      player2Id: null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: 'master-final',
-      loserGoesToBronzeFinal: true,
-    },
-    {
-      id: 'master-sf-2',
-      round: 2,
-      matchIndex: 5,
-      player1Id: null,
-      player2Id: null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: 'master-final',
-      loserGoesToBronzeFinal: true,
-    },
-    {
-      id: 'master-final',
-      round: 3,
-      matchIndex: 6,
-      player1Id: null,
-      player2Id: null,
-      score1: null,
-      score2: null,
-      winnerId: null,
-      nextMatchId: null,
-    },
-    {
-      id: 'master-third',
-      round: 3,
-      matchIndex: 7,
+  const roundedSize = qualifiedPlayerIds.length <= 1
+    ? qualifiedPlayerIds.length
+    : 2 ** Math.ceil(Math.log2(qualifiedPlayerIds.length));
+  if (roundedSize < 2) {
+    return {
+      matches: [],
+      isGenerated: true,
+      finalId: null,
+      bronzeFinalId: null,
+    };
+  }
+
+  const seedOrder = getStandardSeedOrder(roundedSize);
+  const totalRounds = Math.log2(roundedSize);
+  const includeBronzeFinal = roundedSize >= 8;
+  const matches: PlayoffMatch[] = [];
+  const roundMatchIds: string[][] = [];
+  let globalMatchIndex = 0;
+
+  for (let round = 1; round <= totalRounds; round += 1) {
+    const matchesInRound = 2 ** (totalRounds - round);
+    const idsForRound: string[] = [];
+    for (let matchIndex = 0; matchIndex < matchesInRound; matchIndex += 1) {
+      const pairStartIndex = matchIndex * 2;
+      const player1Seed = round === 1 ? seedOrder[pairStartIndex] : null;
+      const player2Seed = round === 1 ? seedOrder[pairStartIndex + 1] : null;
+      const isFinalMatch = round === totalRounds;
+      const isSemifinalMatch = round === totalRounds - 1;
+      const id = isFinalMatch
+        ? 'master-final'
+        : isSemifinalMatch
+          ? `master-sf-${matchIndex + 1}`
+          : round === 1 && roundedSize >= 8
+            ? `master-qf-${matchIndex + 1}`
+            : `master-r${round}-m${matchIndex + 1}`;
+      idsForRound.push(id);
+      matches.push({
+        id,
+        round,
+        matchIndex: globalMatchIndex,
+        player1Id: player1Seed ? qualifiedPlayerIds[player1Seed - 1] ?? null : null,
+        player2Id: player2Seed ? qualifiedPlayerIds[player2Seed - 1] ?? null : null,
+        score1: null,
+        score2: null,
+        winnerId: null,
+        nextMatchId: isFinalMatch ? null : '',
+        loserGoesToBronzeFinal: includeBronzeFinal && isSemifinalMatch,
+      });
+      globalMatchIndex += 1;
+    }
+    roundMatchIds.push(idsForRound);
+  }
+
+  for (let round = 1; round < totalRounds; round += 1) {
+    roundMatchIds[round - 1].forEach((matchId, index) => {
+      const match = matches.find(item => item.id === matchId);
+      if (!match) return;
+      match.nextMatchId = roundMatchIds[round][Math.floor(index / 2)] ?? null;
+    });
+  }
+
+  let bronzeFinalId: string | null = null;
+  if (includeBronzeFinal) {
+    bronzeFinalId = 'master-third';
+    matches.push({
+      id: bronzeFinalId,
+      round: totalRounds,
+      matchIndex: globalMatchIndex,
       player1Id: null,
       player2Id: null,
       score1: null,
@@ -376,45 +372,52 @@ export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): 
       winnerId: null,
       nextMatchId: null,
       isBronzeFinal: true,
-    },
-  ];
+    });
+  }
 
   return recomputeSummerRankingMasterBracket({
     matches,
     isGenerated: true,
     finalId: 'master-final',
-    bronzeFinalId: 'master-third',
+    bronzeFinalId,
   });
 };
 
 export const recomputeSummerRankingMasterBracket = (bracket: PlayoffBracket): PlayoffBracket => {
   const nextBracket = JSON.parse(JSON.stringify(bracket)) as PlayoffBracket;
   const matchMap = new Map(nextBracket.matches.map(match => [match.id, match]));
-  const qf1 = matchMap.get('master-qf-1');
-  const qf2 = matchMap.get('master-qf-2');
-  const qf3 = matchMap.get('master-qf-3');
-  const qf4 = matchMap.get('master-qf-4');
-  const sf1 = matchMap.get('master-sf-1');
-  const sf2 = matchMap.get('master-sf-2');
-  const final = matchMap.get('master-final');
-  const thirdPlace = matchMap.get('master-third');
+  const sortedMatches = nextBracket.matches
+    .slice()
+    .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex);
 
-  [qf1, qf2, qf3, qf4].forEach(match => {
-    if (!match) return;
+  sortedMatches.forEach(match => {
     match.winnerId = getWinnerId(match);
   });
 
-  if (sf1 && qf1 && qf2) {
-    setParticipants(sf1, qf1.winnerId, qf2.winnerId);
-  }
-  if (sf2 && qf3 && qf4) {
-    setParticipants(sf2, qf3.winnerId, qf4.winnerId);
-  }
-  if (final && sf1 && sf2) {
-    setParticipants(final, sf1.winnerId, sf2.winnerId);
-  }
-  if (thirdPlace && sf1 && sf2) {
-    setParticipants(thirdPlace, getLoserId(sf1), getLoserId(sf2));
+  const nextMatchSources = new Map<string, PlayoffMatch[]>();
+  sortedMatches.forEach(match => {
+    if (!match.nextMatchId) return;
+    const sources = nextMatchSources.get(match.nextMatchId) ?? [];
+    sources.push(match);
+    nextMatchSources.set(match.nextMatchId, sources);
+  });
+
+  sortedMatches
+    .filter(match => !match.isBronzeFinal)
+    .forEach(match => {
+      const sources = nextMatchSources.get(match.id) ?? [];
+      if (sources.length === 0) return;
+      setParticipants(match, sources[0]?.winnerId ?? null, sources[1]?.winnerId ?? null);
+    });
+
+  if (nextBracket.bronzeFinalId) {
+    const bronzeFinal = matchMap.get(nextBracket.bronzeFinalId);
+    if (bronzeFinal) {
+      const semifinalLosers = sortedMatches
+        .filter(match => match.loserGoesToBronzeFinal)
+        .map(match => getLoserId(match));
+      setParticipants(bronzeFinal, semifinalLosers[0] ?? null, semifinalLosers[1] ?? null);
+    }
   }
 
   return nextBracket;
@@ -426,6 +429,8 @@ export const syncSummerRankingMasterMatches = (
   completedAtFallback = new Date().toISOString(),
 ): SummerRankingMasterMatch[] => {
   const previousMap = new Map(previousMatches.map(match => [match.id, match]));
+  const maxRound = bracket.matches.reduce((max, match) => Math.max(max, match.round), 0);
+  const stageCounters = new Map<SummerRankingMasterMatch['stage'], number>();
 
   return bracket.matches
     .slice()
@@ -433,14 +438,23 @@ export const syncSummerRankingMasterMatches = (
     .map(match => {
       const previousMatch = previousMap.get(match.id);
       const samePlayers = previousMatch?.player1Id === match.player1Id && previousMatch?.player2Id === match.player2Id;
-      const metadata = MASTER_MATCH_METADATA[match.id as keyof typeof MASTER_MATCH_METADATA];
+      const stage = getMasterMatchStage(match, maxRound);
+      const currentStageCount = (stageCounters.get(stage) ?? 0) + 1;
+      stageCounters.set(stage, currentStageCount);
+      const label = stage === 'final'
+        ? 'Finale'
+        : stage === 'thirdPlace'
+          ? 'Finale 3°/4° posto'
+          : stage === 'semifinal'
+            ? `Semifinale ${currentStageCount}`
+            : `Quarto ${currentStageCount}`;
       const isCompleted = hasValidKnockoutScore(match);
 
       return {
         id: match.id,
         round: match.round,
-        label: metadata?.label ?? 'Partita Master',
-        stage: metadata?.stage ?? 'quarterfinal',
+        label,
+        stage,
         player1Id: match.player1Id,
         player2Id: match.player2Id,
         score1: isCompleted ? match.score1 : null,
