@@ -19,6 +19,30 @@ const isCompletedKnockoutFinal = (match: { player1Id?: string | null; player2Id?
   isCompletedMatch(match, { allowMissingStatus: true }) &&
   match.score1 !== match.score2;
 
+const countGroupMatches = (tournament: Tournament) => {
+  let total = 0;
+  let completed = 0;
+  (tournament.groups ?? []).forEach(group => {
+    (group.matches ?? []).forEach(match => {
+      total++;
+      if (isCompletedMatch(match)) completed++;
+    });
+  });
+  return { total, completed };
+};
+
+const countConsolationMatches = (tournament: Tournament) => {
+  const consolationMatches = Array.isArray(tournament.consolationMatches) ? tournament.consolationMatches : [];
+  const completed = consolationMatches.filter(match => isCompletedMatch(match)).length;
+  return { total: consolationMatches.length, completed };
+};
+
+const countPlayoffLeagueMatches = (tournament: Tournament) => {
+  const playoffMatches = Array.isArray(tournament.playoffMatches) ? tournament.playoffMatches : [];
+  const completed = playoffMatches.filter(match => isCompletedMatch(match)).length;
+  return { total: playoffMatches.length, completed };
+};
+
 const findTournamentFinalMatch = (tournament: Tournament) => {
   if (!tournament.playoffs?.isGenerated) return null;
   const bracketMatches = tournament.playoffs.matches ?? [];
@@ -39,8 +63,11 @@ const findRankingFinalMatch = (
 ) => {
   if (!Array.isArray(matches) || matches.length === 0) return null;
 
-  const byStage = matches.find(match => match.stage === 'final');
-  if (byStage) return byStage;
+  const stageFinals = matches
+    .filter(match => match.stage === 'final')
+    .slice()
+    .sort((left, right) => right.round - left.round || right.id.localeCompare(left.id));
+  if (stageFinals.length > 0) return stageFinals[0];
 
   if (fallbackFinalId) {
     const byId = matches.find(match => match.id === fallbackFinalId);
@@ -83,20 +110,35 @@ const isRankingMasterConcluded = (event: Event): boolean => {
  * - If a consolation bracket was generated, all consolation league-matches are completed
  */
 export function isTournamentConcluded(tournament: Tournament): boolean {
+  const { total: totalGroupMatches, completed: completedGroupMatches } = countGroupMatches(tournament);
+  const areGroupMatchesComplete = totalGroupMatches === 0 || completedGroupMatches === totalGroupMatches;
+
   const playoffFinal = findTournamentFinalMatch(tournament);
   if (playoffFinal) {
-    return isCompletedKnockoutFinal(playoffFinal);
+    return areGroupMatchesComplete && isCompletedKnockoutFinal(playoffFinal);
   }
 
-  let totalGroupMatches = 0;
-  let completedGroupMatches = 0;
-  (tournament.groups ?? []).forEach(group => {
-    (group.matches ?? []).forEach(match => {
-      totalGroupMatches++;
-      if (isCompletedMatch(match)) completedGroupMatches++;
-    });
-  });
-  return totalGroupMatches > 0 && completedGroupMatches === totalGroupMatches;
+  if (!areGroupMatchesComplete) return false;
+
+  let hasTrackedMatches = totalGroupMatches > 0;
+
+  if (tournament.playoffs?.isGenerated) {
+    const { total: totalPlayoffMatches, completed: completedPlayoffMatches } = countPlayoffLeagueMatches(tournament);
+    if (totalPlayoffMatches > 0) {
+      hasTrackedMatches = true;
+      if (completedPlayoffMatches !== totalPlayoffMatches) return false;
+    }
+  }
+
+  if (!tournament.consolationBracket?.isGenerated) return hasTrackedMatches;
+
+  const { total: totalConsolationMatches, completed: completedConsolationMatches } = countConsolationMatches(tournament);
+  if (totalConsolationMatches > 0) {
+    hasTrackedMatches = true;
+    if (completedConsolationMatches !== totalConsolationMatches) return false;
+  }
+
+  return hasTrackedMatches;
 }
 
 /**

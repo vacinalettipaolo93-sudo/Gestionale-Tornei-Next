@@ -92,6 +92,30 @@ test('tournament is concluded when final result is valid and saved', () => {
   assert.equal(finalMatch.winnerId, 'p1');
 });
 
+test('playoff final is not enough when a group-stage match is still pending', () => {
+  const tournament = buildTournament({
+    groups: [
+      {
+        id: 'g1',
+        name: 'Girone A',
+        playerIds: ['p1', 'p2'],
+        matches: [
+          { id: 'g1m1', player1Id: 'p1', player2Id: 'p2', score1: null, score2: null, status: 'pending' },
+        ],
+      },
+    ],
+    playoffs: {
+      isGenerated: true,
+      finalId: 'final-1',
+      bronzeFinalId: null,
+      matches: [
+        { id: 'final-1', round: 1, matchIndex: 1, player1Id: 'p3', player2Id: 'p4', score1: 6, score2: 2, winnerId: 'p3', nextMatchId: null },
+      ],
+    },
+  });
+  assert.equal(isTournamentConcluded(tournament), false);
+});
+
 test('tournament returns to in corso when final result is reset', () => {
   const tournament = buildTournament({
     playoffs: {
@@ -125,6 +149,22 @@ test('event enters conclusi for knockout tournament format after final', () => {
     ],
   };
   assert.equal(isEventConcluded(event), true);
+});
+
+test('generated playoff without bracket metadata still concludes when playoff league matches are all completed', () => {
+  const tournament = buildTournament({
+    playoffs: {
+      isGenerated: true,
+      finalId: null,
+      bronzeFinalId: null,
+      matches: [],
+    },
+    playoffMatches: [
+      { id: 'po-r1-m1', player1Id: 'p1', player2Id: 'p2', score1: 6, score2: 4, status: 'completed' },
+      { id: 'po-r1-m2', player1Id: 'p3', player2Id: 'p4', score1: 7, score2: 5, status: 'completed' },
+    ],
+  });
+  assert.equal(isTournamentConcluded(tournament), true);
 });
 
 test('ranking event enters conclusi only after master final (second format)', () => {
