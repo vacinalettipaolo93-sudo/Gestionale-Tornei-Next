@@ -106,12 +106,11 @@ const isRankingMasterConcluded = (event: Event): boolean => {
 };
 
 /**
- * Determines if a single tournament is concluded (all expected matches played).
+ * Determines if a single tournament is concluded.
  * A tournament is concluded when:
- * - It has at least one match
- * - All group matches are completed
- * - If a playoff bracket was generated, all playoff league-matches are completed
- * - If a consolation bracket was generated, all consolation league-matches are completed
+ * - If a playoff final is available, the final result is valid and saved
+ *   (with group-stage completion required when group matches exist)
+ * - Otherwise fallback to tracked matches completion (groups + playoff/consolation league matches)
  */
 export function isTournamentConcluded(tournament: Tournament): boolean {
   const { total: totalGroupMatches, completed: completedGroupMatches } = countGroupMatches(tournament);
@@ -167,7 +166,7 @@ export function isTournamentConcluded(tournament: Tournament): boolean {
 
 /**
  * Determines if an event is concluded.
- * - For ranking_singolare / ranking_padel_individuale: always false (kept "In corso" by default)
+ * - For ranking_singolare / ranking_padel_individuale: concluded when a valid Master final is completed
  * - For tournament_singolare: the event must have at least one tournament
  *   and all its tournaments must be concluded.
  */
