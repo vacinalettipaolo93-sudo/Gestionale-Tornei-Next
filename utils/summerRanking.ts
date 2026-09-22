@@ -516,9 +516,18 @@ export const updateSummerRankingMasterBracketParticipants = ({
     return { error: 'Partita del tabellone non trovata.' };
   }
 
-  const previousDuplicateIds = getRoundDuplicateIds(previousBracket.matches, updatedTargetMatch.round);
-  const nextDuplicateIds = getRoundDuplicateIds(recomputedBracket.matches, updatedTargetMatch.round);
-  const introducedDuplicateIds = [...nextDuplicateIds].filter(playerId => !previousDuplicateIds.has(playerId));
+  const affectedRounds = Array.from(
+    new Set(
+      recomputedBracket.matches
+        .filter(match => match.round >= updatedTargetMatch.round)
+        .map(match => match.round),
+    ),
+  );
+  const introducedDuplicateIds = affectedRounds.flatMap(round => {
+    const previousDuplicateIds = getRoundDuplicateIds(previousBracket.matches, round);
+    const nextDuplicateIds = getRoundDuplicateIds(recomputedBracket.matches, round);
+    return [...nextDuplicateIds].filter(playerId => !previousDuplicateIds.has(playerId));
+  });
   if (introducedDuplicateIds.length > 0) {
     return { error: 'Non sono ammessi duplicati nello stesso turno del tabellone.' };
   }

@@ -3122,7 +3122,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                                 ))}
                               </select>
                               {masterPlayersForm.error && (
-                                <p className="text-xs text-red-400">{masterPlayersForm.error}</p>
+                                <p role="alert" className="text-xs text-red-400">{masterPlayersForm.error}</p>
                               )}
                               <div className="flex flex-wrap gap-2">
                                 <button onClick={() => handleSaveMasterPlayers(match)} className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold">Salva giocatori</button>
@@ -3274,7 +3274,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                                     ))}
                                   </select>
                                   {masterPlayersForm.error && (
-                                    <p className="text-xs text-red-400">{masterPlayersForm.error}</p>
+                                    <p role="alert" className="text-xs text-red-400">{masterPlayersForm.error}</p>
                                   )}
                                   <div className="flex flex-wrap gap-2">
                                     <button
