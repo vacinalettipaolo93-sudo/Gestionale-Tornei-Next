@@ -1,10 +1,7 @@
 import { type Event, type Tournament } from '../types';
 
-const isCompletedMatch = (
-  match: { status?: string; score1?: number | null; score2?: number | null },
-  options?: { allowMissingStatus?: boolean },
-) =>
-  (match.status === 'completed' || (!!options?.allowMissingStatus && match.status === undefined)) &&
+const isCompletedMatch = (match: { status?: string; score1?: number | null; score2?: number | null }) =>
+  match.status === 'completed' &&
   match.score1 !== null &&
   match.score1 !== undefined &&
   match.score2 !== null &&
@@ -16,8 +13,15 @@ const isCompletedKnockoutFinal = (match: { player1Id?: string | null; player2Id?
   !!match &&
   !!match.player1Id &&
   !!match.player2Id &&
-  isCompletedMatch(match, { allowMissingStatus: true }) &&
+  isCompletedMatch(match) &&
   match.score1 !== match.score2;
+
+const hasAssignedKnockoutWinner = (match: { player1Id?: string | null; player2Id?: string | null; winnerId?: string | null } | null | undefined) =>
+  !!match &&
+  !!match.player1Id &&
+  !!match.player2Id &&
+  !!match.winnerId &&
+  [match.player1Id, match.player2Id].includes(match.winnerId);
 
 const countGroupMatches = (tournament: Tournament) => {
   let total = 0;
@@ -115,7 +119,27 @@ export function isTournamentConcluded(tournament: Tournament): boolean {
 
   const playoffFinal = findTournamentFinalMatch(tournament);
   if (playoffFinal) {
-    return areGroupMatchesComplete && isCompletedKnockoutFinal(playoffFinal);
+    const finalLeagueMatchId = `po-${playoffFinal.id}`;
+    const finalLeagueMatch = (Array.isArray(tournament.playoffMatches) ? tournament.playoffMatches : [])
+      .find(match => match.id === finalLeagueMatchId);
+
+    const finalMatchForCompletionCheck = finalLeagueMatch
+      ? {
+          ...playoffFinal,
+          status: finalLeagueMatch.status,
+          score1: finalLeagueMatch.score1,
+          score2: finalLeagueMatch.score2,
+        }
+      : (
+          (playoffFinal as { winnerId?: string | null }).winnerId
+            ? { ...playoffFinal, status: 'completed' as const }
+            : null
+        );
+
+    return areGroupMatchesComplete && (
+      isCompletedKnockoutFinal(finalMatchForCompletionCheck) ||
+      hasAssignedKnockoutWinner(playoffFinal as { player1Id?: string | null; player2Id?: string | null; winnerId?: string | null })
+    );
   }
 
   if (!areGroupMatchesComplete) return false;

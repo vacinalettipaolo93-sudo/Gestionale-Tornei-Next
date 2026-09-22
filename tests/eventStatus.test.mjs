@@ -167,6 +167,45 @@ test('generated playoff without bracket metadata still concludes when playoff le
   assert.equal(isTournamentConcluded(tournament), true);
 });
 
+test('generated playoff without bracket metadata stays in corso when at least one playoff league match is pending', () => {
+  const tournament = buildTournament({
+    playoffs: {
+      isGenerated: true,
+      finalId: null,
+      bronzeFinalId: null,
+      matches: [],
+    },
+    playoffMatches: [
+      { id: 'po-r1-m1', player1Id: 'p1', player2Id: 'p2', score1: 6, score2: 4, status: 'completed' },
+      { id: 'po-r1-m2', player1Id: 'p3', player2Id: 'p4', score1: null, score2: null, status: 'pending' },
+    ],
+  });
+  assert.equal(isTournamentConcluded(tournament), false);
+});
+
+test('generated empty consolation bracket does not block conclusion when tracked matches are complete', () => {
+  const tournament = buildTournament({
+    groups: [
+      {
+        id: 'g1',
+        name: 'Girone A',
+        playerIds: ['p1', 'p2'],
+        matches: [
+          { id: 'g1m1', player1Id: 'p1', player2Id: 'p2', score1: 6, score2: 4, status: 'completed' },
+        ],
+      },
+    ],
+    consolationBracket: {
+      isGenerated: true,
+      finalId: null,
+      bronzeFinalId: null,
+      matches: [],
+    },
+    consolationMatches: [],
+  });
+  assert.equal(isTournamentConcluded(tournament), true);
+});
+
 test('ranking event enters conclusi only after master final (second format)', () => {
   const rankingEvent = {
     id: 'e2',
@@ -198,5 +237,41 @@ test('ranking event enters conclusi only after master final (second format)', ()
     status: 'completed',
     completedAt: new Date().toISOString(),
   };
+  assert.equal(isEventConcluded(rankingEvent), true);
+});
+
+test('padel individual ranking event enters conclusi only after master final', () => {
+  const rankingEvent = {
+    id: 'e3',
+    name: 'Padel Individuale',
+    invitationCode: 'GHI',
+    players: [],
+    eventType: 'ranking_padel_individuale',
+    tournaments: [],
+    rankingData: {
+      matches: [],
+      slots: [],
+      participantIds: [],
+      padelIndividualMaster: {
+        qualifiedPlayerIds: ['p1', 'p2', 'p3', 'p4'],
+        pairs: [],
+        bracket: { isGenerated: true, finalId: 'master-final', bronzeFinalId: null, matches: [] },
+        matches: [
+          { id: 'master-final', round: 2, label: 'Finale', stage: 'final', player1Id: 'pair-1', player2Id: 'pair-2', score1: null, score2: null, status: 'pending' },
+        ],
+      },
+    },
+  };
+
+  assert.equal(isEventConcluded(rankingEvent), false);
+
+  rankingEvent.rankingData.padelIndividualMaster.matches[0] = {
+    ...rankingEvent.rankingData.padelIndividualMaster.matches[0],
+    score1: 6,
+    score2: 4,
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+  };
+
   assert.equal(isEventConcluded(rankingEvent), true);
 });
