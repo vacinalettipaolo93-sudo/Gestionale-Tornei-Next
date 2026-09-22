@@ -261,6 +261,34 @@ const setParticipants = (
   match.winnerId = getWinnerId(match);
 };
 
+const getBracketSourceMatches = (bracket: PlayoffBracket) => {
+  const sortedMatches = bracket.matches
+    .slice()
+    .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex);
+  const nextMatchSources = new Map<string, PlayoffMatch[]>();
+
+  sortedMatches.forEach(match => {
+    if (!match.nextMatchId) return;
+    const sources = nextMatchSources.get(match.nextMatchId) ?? [];
+    sources.push(match);
+    nextMatchSources.set(match.nextMatchId, sources);
+  });
+
+  return nextMatchSources;
+};
+
+const resolveManualParticipant = (
+  manualPlayerId: string | null | undefined,
+  autoPlayerId: string | null,
+) => (manualPlayerId === undefined ? autoPlayerId : manualPlayerId);
+
+const getRoundDuplicateIds = (matches: PlayoffMatch[], round: number) => {
+  const playerIds = matches
+    .filter(match => match.round === round)
+    .flatMap(match => [match.player1Id, match.player2Id].filter((playerId): playerId is string => Boolean(playerId)));
+  return new Set(playerIds.filter((playerId, index, list) => list.indexOf(playerId) !== index));
+};
+
 export const getSummerRankingAutoQualifiedPlayerIds = (ranking: SummerRankingEntry[], config?: SummerRankingRulesConfig) => {
   const cfg = config ?? DEFAULT_RULES_CONFIG;
   return ranking
@@ -394,17 +422,21 @@ export const recomputeSummerRankingMasterBracket = (bracket: PlayoffBracket): Pl
   const sortedMatches = nextBracket.matches
     .slice()
     .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex);
+  const nextMatchSources = getBracketSourceMatches(nextBracket);
+
+  sortedMatches
+    .filter(match => !match.isBronzeFinal && (nextMatchSources.get(match.id)?.length ?? 0) === 0)
+    .forEach(match => {
+      if (match.manualPlayer1Id === undefined && match.manualPlayer2Id === undefined) return;
+      setParticipants(
+        match,
+        resolveManualParticipant(match.manualPlayer1Id, match.player1Id ?? null),
+        resolveManualParticipant(match.manualPlayer2Id, match.player2Id ?? null),
+      );
+    });
 
   sortedMatches.forEach(match => {
     match.winnerId = getWinnerId(match);
-  });
-
-  const nextMatchSources = new Map<string, PlayoffMatch[]>();
-  sortedMatches.forEach(match => {
-    if (!match.nextMatchId) return;
-    const sources = nextMatchSources.get(match.nextMatchId) ?? [];
-    sources.push(match);
-    nextMatchSources.set(match.nextMatchId, sources);
   });
 
   sortedMatches
@@ -412,7 +444,11 @@ export const recomputeSummerRankingMasterBracket = (bracket: PlayoffBracket): Pl
     .forEach(match => {
       const sources = nextMatchSources.get(match.id) ?? [];
       if (sources.length === 0) return;
-      setParticipants(match, sources[0]?.winnerId ?? null, sources[1]?.winnerId ?? null);
+      setParticipants(
+        match,
+        resolveManualParticipant(match.manualPlayer1Id, sources[0]?.winnerId ?? null),
+        resolveManualParticipant(match.manualPlayer2Id, sources[1]?.winnerId ?? null),
+      );
     });
 
   if (nextBracket.bronzeFinalId) {
@@ -421,11 +457,82 @@ export const recomputeSummerRankingMasterBracket = (bracket: PlayoffBracket): Pl
       const semifinalLosers = sortedMatches
         .filter(match => match.loserGoesToBronzeFinal)
         .map(match => getLoserId(match));
-      setParticipants(bronzeFinal, semifinalLosers[0] ?? null, semifinalLosers[1] ?? null);
+      setParticipants(
+        bronzeFinal,
+        resolveManualParticipant(bronzeFinal.manualPlayer1Id, semifinalLosers[0] ?? null),
+        resolveManualParticipant(bronzeFinal.manualPlayer2Id, semifinalLosers[1] ?? null),
+      );
     }
   }
 
   return nextBracket;
+};
+
+export const updateSummerRankingMasterBracketParticipants = ({
+  bracket,
+  matchId,
+  player1Id,
+  player2Id,
+  validPlayerIds,
+}: {
+  bracket: PlayoffBracket;
+  matchId: string;
+  player1Id: string | null | undefined;
+  player2Id: string | null | undefined;
+  validPlayerIds: string[];
+}) => {
+  const previousBracket = recomputeSummerRankingMasterBracket(bracket);
+  const nextBracket = JSON.parse(JSON.stringify(bracket)) as PlayoffBracket;
+  const nextMatchSources = getBracketSourceMatches(nextBracket);
+  const targetMatch = nextBracket.matches.find(match => match.id === matchId);
+  if (!targetMatch) {
+    return { error: 'Partita del tabellone non trovata.' };
+  }
+
+  const validPlayerIdSet = new Set(validPlayerIds.filter(Boolean));
+  const isValidSelection = (value: string | null | undefined) => value === undefined || value === null || validPlayerIdSet.has(value);
+  if (!isValidSelection(player1Id) || !isValidSelection(player2Id)) {
+    return { error: 'Seleziona solo giocatori validi della classifica.' };
+  }
+  if (player1Id && player2Id && player1Id === player2Id) {
+    return { error: 'Non puoi assegnare lo stesso giocatore a entrambi gli slot dello stesso incontro.' };
+  }
+
+  targetMatch.manualPlayer1Id = player1Id;
+  targetMatch.manualPlayer2Id = player2Id;
+
+  const hasAutomaticParticipants = targetMatch.isBronzeFinal || (nextMatchSources.get(targetMatch.id)?.length ?? 0) > 0;
+  if (!hasAutomaticParticipants) {
+    setParticipants(
+      targetMatch,
+      player1Id === undefined ? targetMatch.player1Id : player1Id,
+      player2Id === undefined ? targetMatch.player2Id : player2Id,
+    );
+  }
+
+  const recomputedBracket = recomputeSummerRankingMasterBracket(nextBracket);
+  const updatedTargetMatch = recomputedBracket.matches.find(match => match.id === matchId);
+  if (!updatedTargetMatch) {
+    return { error: 'Partita del tabellone non trovata.' };
+  }
+
+  const affectedRounds = Array.from(
+    new Set(
+      recomputedBracket.matches
+        .filter(match => match.round >= updatedTargetMatch.round)
+        .map(match => match.round),
+    ),
+  );
+  const introducedDuplicateIds = affectedRounds.flatMap(round => {
+    const previousDuplicateIds = getRoundDuplicateIds(previousBracket.matches, round);
+    const nextDuplicateIds = getRoundDuplicateIds(recomputedBracket.matches, round);
+    return [...nextDuplicateIds].filter(playerId => !previousDuplicateIds.has(playerId));
+  });
+  if (introducedDuplicateIds.length > 0) {
+    return { error: 'Non sono ammessi duplicati nello stesso turno del tabellone.' };
+  }
+
+  return { bracket: recomputedBracket };
 };
 
 export const syncSummerRankingMasterMatches = (

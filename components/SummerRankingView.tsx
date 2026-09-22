@@ -38,6 +38,7 @@ import {
   resetSummerRankingMasterData,
   removePlayerFromSummerRankingMaster,
   syncSummerRankingMasterMatches,
+  updateSummerRankingMasterBracketParticipants,
 } from '../utils/summerRanking';
 import {
   getSummerRankingScrollTarget,
@@ -101,6 +102,10 @@ type AvailabilityFormState = {
   draft: AvailabilityDraftState;
 };
 type MasterScoreFormState = { matchId: string | null; score1: string; score2: string };
+type MasterPlayersFormState = { matchId: string | null; player1Id: string; player2Id: string; error: string | null };
+
+const MASTER_PLAYER_AUTO = '__auto__';
+const MASTER_PLAYER_EMPTY = '__empty__';
 
 const AVAILABILITY_DAYS: Array<{ value: SummerAvailabilityDay; label: string; shortLabel: string }> = [
   { value: 'monday', label: 'Lunedì', shortLabel: 'Lun' },
@@ -558,7 +563,14 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   const [masterFormatDraft, setMasterFormatDraft] = useState<SummerRankingMasterFormat>('bracket');
   const [masterBookingSlotIdByMatch, setMasterBookingSlotIdByMatch] = useState<Record<string, string>>({});
   const [editingMasterMatchId, setEditingMasterMatchId] = useState<string | null>(null);
+  const [editingMasterPlayersMatchId, setEditingMasterPlayersMatchId] = useState<string | null>(null);
   const [masterScoreForm, setMasterScoreForm] = useState<MasterScoreFormState>({ matchId: null, score1: '', score2: '' });
+  const [masterPlayersForm, setMasterPlayersForm] = useState<MasterPlayersFormState>({
+    matchId: null,
+    player1Id: '',
+    player2Id: '',
+    error: null,
+  });
   const [challengeModal, setChallengeModal] = useState<ChallengeModalState | null>(null);
   const [challengeError, setChallengeError] = useState<string | null>(null);
   const [challengeSuccess, setChallengeSuccess] = useState<string | null>(null);
@@ -633,6 +645,10 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
     [rankingData.master?.groups],
   );
   const masterBracket = rankingData.master?.bracket;
+  const masterBracketMatchById = useMemo(
+    () => new Map((masterBracket?.matches ?? []).map(match => [match.id, match])),
+    [masterBracket],
+  );
   const masterMatches = useMemo(
     () => {
       if (Array.isArray(rankingData.master?.matches) && rankingData.master.matches.length > 0) {
@@ -1125,10 +1141,81 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
 
     setEditingMasterMatchId(null);
     setMasterScoreForm({ matchId: null, score1: '', score2: '' });
+    closeEditMasterPlayers();
   };
 
   const canManageMasterMatch = (match: SummerRankingMasterMatch) =>
     isOrganizer || loggedInPlayerId === match.player1Id || loggedInPlayerId === match.player2Id;
+
+  const getMasterPlayerDraftValue = (matchId: string, slot: 'player1' | 'player2') => {
+    const bracketMatch = masterBracketMatchById.get(matchId);
+    const manualValue = slot === 'player1' ? bracketMatch?.manualPlayer1Id : bracketMatch?.manualPlayer2Id;
+    const currentValue = slot === 'player1' ? bracketMatch?.player1Id : bracketMatch?.player2Id;
+    if (manualValue === undefined) return currentValue ?? MASTER_PLAYER_AUTO;
+    if (manualValue === null) return MASTER_PLAYER_EMPTY;
+    return manualValue;
+  };
+
+  const openEditMasterPlayers = (match: SummerRankingMasterMatch) => {
+    if (!isOrganizer || masterFormat !== 'bracket') return;
+    setEditingMasterPlayersMatchId(match.id);
+    setMasterPlayersForm({
+      matchId: match.id,
+      player1Id: getMasterPlayerDraftValue(match.id, 'player1'),
+      player2Id: getMasterPlayerDraftValue(match.id, 'player2'),
+      error: null,
+    });
+  };
+
+  const closeEditMasterPlayers = () => {
+    setEditingMasterPlayersMatchId(null);
+    setMasterPlayersForm({
+      matchId: null,
+      player1Id: '',
+      player2Id: '',
+      error: null,
+    });
+  };
+
+  const parseMasterPlayerDraftValue = (value: string) => {
+    if (value === MASTER_PLAYER_AUTO) return undefined;
+    if (value === MASTER_PLAYER_EMPTY) return null;
+    return value || null;
+  };
+
+  const handleSaveMasterPlayers = async (match: SummerRankingMasterMatch) => {
+    if (!isOrganizer || masterFormat !== 'bracket' || !rankingData.master?.bracket || !rankingData.master?.matches) return;
+    const result = updateSummerRankingMasterBracketParticipants({
+      bracket: rankingData.master.bracket,
+      matchId: match.id,
+      player1Id: parseMasterPlayerDraftValue(masterPlayersForm.player1Id),
+      player2Id: parseMasterPlayerDraftValue(masterPlayersForm.player2Id),
+      validPlayerIds: masterCandidatePlayers.map(player => player.id),
+    });
+
+    if (!result.bracket) {
+      setMasterPlayersForm(previous => ({
+        ...previous,
+        error: result.error ?? 'Salvataggio non riuscito. Riprova.',
+      }));
+      return;
+    }
+
+    const nextMaster = rebuildMasterState(
+      result.bracket,
+      rankingData.master.matches,
+      rankingData.master.generatedQualifiedPlayerIds ?? [],
+      rankingData.master.manualQualifiedPlayerIds,
+      rankingData.master.generatedAt,
+    );
+
+    await onSaveRankingData({
+      ...rankingData,
+      master: nextMaster,
+    });
+
+    closeEditMasterPlayers();
+  };
 
   const handleScheduleMasterMatch = async (match: SummerRankingMasterMatch) => {
     const slotId = masterBookingSlotIdByMatch[match.id];
@@ -1546,6 +1633,10 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
         .slice()
         .sort((a, b) => a.round - b.round || a.label.localeCompare(b.label)),
     [masterMatches],
+  );
+  const masterPlayerSelectOptions = useMemo(
+    () => masterCandidatePlayers.map(player => ({ value: player.id, label: player.name })),
+    [masterCandidatePlayers],
   );
   const visibleMasterStages = useMemo(
     () =>
@@ -3006,7 +3097,39 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                         ) : null}
 
                         <div>
-                          {editingMasterMatchId === match.id ? (
+                          {editingMasterPlayersMatchId === match.id ? (
+                            <div className="flex flex-col gap-2">
+                              <select
+                                value={masterPlayersForm.player1Id}
+                                onChange={event => setMasterPlayersForm(previous => ({ ...previous, player1Id: event.target.value, error: null }))}
+                                className="w-full bg-primary border border-tertiary rounded-lg p-2 text-sm"
+                              >
+                                <option value={MASTER_PLAYER_AUTO}>Giocatore 1 automatico</option>
+                                <option value={MASTER_PLAYER_EMPTY}>Lascia slot vuoto</option>
+                                {masterPlayerSelectOptions.map(option => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={masterPlayersForm.player2Id}
+                                onChange={event => setMasterPlayersForm(previous => ({ ...previous, player2Id: event.target.value, error: null }))}
+                                className="w-full bg-primary border border-tertiary rounded-lg p-2 text-sm"
+                              >
+                                <option value={MASTER_PLAYER_AUTO}>Giocatore 2 automatico</option>
+                                <option value={MASTER_PLAYER_EMPTY}>Lascia slot vuoto</option>
+                                {masterPlayerSelectOptions.map(option => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                              {masterPlayersForm.error && (
+                                <p role="alert" className="text-xs text-red-400">{masterPlayersForm.error}</p>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                <button onClick={() => handleSaveMasterPlayers(match)} className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold">Salva giocatori</button>
+                                <button onClick={closeEditMasterPlayers} className="px-3 py-1 rounded bg-primary border border-tertiary text-xs font-semibold">Annulla</button>
+                              </div>
+                            </div>
+                          ) : editingMasterMatchId === match.id ? (
                             <div className="flex items-center gap-2">
                               <input type="number" min="0" value={masterScoreForm.score1}
                                 onChange={event => setMasterScoreForm(previous => ({ ...previous, score1: event.target.value }))}
@@ -3027,6 +3150,11 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                         </div>
 
                         <div className="flex flex-wrap gap-2">
+                          {isOrganizer && masterFormat === 'bracket' && editingMasterPlayersMatchId !== match.id && editingMasterMatchId !== match.id && (
+                            <button onClick={() => openEditMasterPlayers(match)} className="px-3 py-1.5 rounded bg-primary border border-tertiary text-xs font-semibold">
+                              Modifica giocatori
+                            </button>
+                          )}
                           {canManage && match.player1Id && match.player2Id && editingMasterMatchId !== match.id && (
                             <button onClick={() => openEditMasterResult(match)} className="px-3 py-1.5 rounded bg-tertiary hover:bg-tertiary/90 text-text-primary text-xs font-semibold">
                               {match.status === 'completed' ? 'Modifica risultato' : 'Pubblica risultato'}
@@ -3121,7 +3249,49 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                               )}
                             </td>
                             <td className="py-4 pr-3">
-                              {editingMasterMatchId === match.id ? (
+                              {editingMasterPlayersMatchId === match.id ? (
+                                <div className="flex flex-col gap-2">
+                                  <select
+                                    value={masterPlayersForm.player1Id}
+                                    onChange={event => setMasterPlayersForm(previous => ({ ...previous, player1Id: event.target.value, error: null }))}
+                                    className="min-w-[280px] bg-primary border border-tertiary rounded-lg p-2"
+                                  >
+                                    <option value={MASTER_PLAYER_AUTO}>Giocatore 1 automatico</option>
+                                    <option value={MASTER_PLAYER_EMPTY}>Lascia slot vuoto</option>
+                                    {masterPlayerSelectOptions.map(option => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    value={masterPlayersForm.player2Id}
+                                    onChange={event => setMasterPlayersForm(previous => ({ ...previous, player2Id: event.target.value, error: null }))}
+                                    className="min-w-[280px] bg-primary border border-tertiary rounded-lg p-2"
+                                  >
+                                    <option value={MASTER_PLAYER_AUTO}>Giocatore 2 automatico</option>
+                                    <option value={MASTER_PLAYER_EMPTY}>Lascia slot vuoto</option>
+                                    {masterPlayerSelectOptions.map(option => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                  {masterPlayersForm.error && (
+                                    <p role="alert" className="text-xs text-red-400">{masterPlayersForm.error}</p>
+                                  )}
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      onClick={() => handleSaveMasterPlayers(match)}
+                                      className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold"
+                                    >
+                                      Salva giocatori
+                                    </button>
+                                    <button
+                                      onClick={closeEditMasterPlayers}
+                                      className="px-3 py-1 rounded bg-primary border border-tertiary text-xs font-semibold"
+                                    >
+                                      Annulla
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : editingMasterMatchId === match.id ? (
                                 <div className="flex items-center gap-2">
                                   <input
                                     type="number"
@@ -3153,6 +3323,14 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                             </td>
                             <td className="py-4 pr-3">
                               <div className="flex flex-wrap gap-2">
+                                {isOrganizer && masterFormat === 'bracket' && editingMasterPlayersMatchId !== match.id && editingMasterMatchId !== match.id && (
+                                  <button
+                                    onClick={() => openEditMasterPlayers(match)}
+                                    className="px-3 py-1 rounded bg-primary border border-tertiary text-xs font-semibold"
+                                  >
+                                    Modifica giocatori
+                                  </button>
+                                )}
                                 {canManage && match.player1Id && match.player2Id && editingMasterMatchId !== match.id && (
                                   <button
                                     onClick={() => openEditMasterResult(match)}
