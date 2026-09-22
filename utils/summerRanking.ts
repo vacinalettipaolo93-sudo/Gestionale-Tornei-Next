@@ -500,12 +500,10 @@ export const updateSummerRankingMasterBracketParticipants = ({
     return { error: 'Non puoi assegnare lo stesso giocatore a entrambi gli slot dello stesso incontro.' };
   }
 
-  if (hasAutomaticParticipants(targetMatch, nextBracket)) {
-    targetMatch.manualPlayer1Id = player1Id;
-    targetMatch.manualPlayer2Id = player2Id;
-  } else {
-    targetMatch.manualPlayer1Id = player1Id;
-    targetMatch.manualPlayer2Id = player2Id;
+  targetMatch.manualPlayer1Id = player1Id;
+  targetMatch.manualPlayer2Id = player2Id;
+
+  if (!hasAutomaticParticipants(targetMatch, nextBracket)) {
     setParticipants(
       targetMatch,
       player1Id === undefined ? targetMatch.player1Id : player1Id,
