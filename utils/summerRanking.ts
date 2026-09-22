@@ -175,13 +175,8 @@ const MASTER_GROUP_PAIRINGS: Array<[number, number]> = [
 const getStandardSeedOrder = (size: number): number[] => {
   if (size <= 1) return [1];
   if (size === 2) return [1, 2];
-
-  let order = [1, 2];
-  while (order.length < size) {
-    const nextSize = order.length * 2;
-    order = order.flatMap(seed => [seed, nextSize + 1 - seed]);
-  }
-  return order;
+  const previousOrder = getStandardSeedOrder(size / 2);
+  return previousOrder.flatMap(seed => [seed, size + 1 - seed]);
 };
 
 const getMasterMatchStage = (
@@ -297,10 +292,8 @@ export const getSummerRankingMasterFormat = (master?: SummerRankingMasterData): 
   master?.format === 'groups' || (Array.isArray(master?.groups) && master.groups.length > 0) ? 'groups' : 'bracket';
 
 export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): PlayoffBracket => {
-  const roundedSize = qualifiedPlayerIds.length <= 1
-    ? qualifiedPlayerIds.length
-    : 2 ** Math.ceil(Math.log2(qualifiedPlayerIds.length));
-  if (roundedSize < 2) {
+  const bracketSize = qualifiedPlayerIds.length;
+  if (bracketSize === 1) {
     return {
       matches: [],
       isGenerated: true,
@@ -308,11 +301,21 @@ export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): 
       bronzeFinalId: null,
     };
   }
+  const isPowerOfTwo = bracketSize > 1 && (bracketSize & (bracketSize - 1)) === 0;
+  if (!isPowerOfTwo) {
+    return {
+      matches: [],
+      isGenerated: false,
+      finalId: null,
+      bronzeFinalId: null,
+    };
+  }
 
-  const seedOrder = getStandardSeedOrder(roundedSize);
-  const totalRounds = Math.log2(roundedSize);
-  const includeBronzeFinal = roundedSize >= 8;
+  const seedOrder = getStandardSeedOrder(bracketSize);
+  const totalRounds = Math.log2(bracketSize);
+  const includeBronzeFinal = bracketSize >= 8;
   const matches: PlayoffMatch[] = [];
+  const matchById = new Map<string, PlayoffMatch>();
   const roundMatchIds: string[][] = [];
   let globalMatchIndex = 0;
 
@@ -329,11 +332,11 @@ export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): 
         ? 'master-final'
         : isSemifinalMatch
           ? `master-sf-${matchIndex + 1}`
-          : round === 1 && roundedSize >= 8
+          : round === 1 && bracketSize >= 8
             ? `master-qf-${matchIndex + 1}`
             : `master-r${round}-m${matchIndex + 1}`;
       idsForRound.push(id);
-      matches.push({
+      const match: PlayoffMatch = {
         id,
         round,
         matchIndex: globalMatchIndex,
@@ -344,7 +347,9 @@ export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): 
         winnerId: null,
         nextMatchId: isFinalMatch ? null : '',
         loserGoesToBronzeFinal: includeBronzeFinal && isSemifinalMatch,
-      });
+      };
+      matches.push(match);
+      matchById.set(id, match);
       globalMatchIndex += 1;
     }
     roundMatchIds.push(idsForRound);
@@ -352,7 +357,7 @@ export const createSummerRankingMasterBracket = (qualifiedPlayerIds: string[]): 
 
   for (let round = 1; round < totalRounds; round += 1) {
     roundMatchIds[round - 1].forEach((matchId, index) => {
-      const match = matches.find(item => item.id === matchId);
+      const match = matchById.get(matchId);
       if (!match) return;
       match.nextMatchId = roundMatchIds[round][Math.floor(index / 2)] ?? null;
     });

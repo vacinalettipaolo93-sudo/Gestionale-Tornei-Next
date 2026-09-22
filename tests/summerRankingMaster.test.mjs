@@ -8,9 +8,10 @@ import { pathToFileURL } from 'node:url';
 
 const repoRoot = process.cwd();
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'summer-ranking-master-'));
+const tscCliPath = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
 
-execFileSync('npx', [
-  'tsc',
+execFileSync(process.execPath, [
+  tscCliPath,
   '--outDir', tempDir,
   '--module', 'ESNext',
   '--target', 'ES2022',
@@ -30,9 +31,11 @@ writeFileSync(
 
 const summerRankingModuleUrl = pathToFileURL(summerRankingPath).href;
 const {
+  createSummerRankingMasterBracket,
   createSummerRankingMasterData,
   getSummerRankingMasterQualifiedPlayerIds,
   normalizeRulesConfig,
+  recomputeSummerRankingMasterBracket,
 } = await import(summerRankingModuleUrl);
 
 const createRankingEntry = (id, rank) => ({
@@ -81,6 +84,24 @@ test('master bracket keeps standard seed pairings 1vs8, 2vs7, 3vs6, 4vs5', () =>
       ['p4', 'p5'],
     ].map(pair => pair.slice().sort().join(':')).sort(),
   );
+
+  const bracket = createSummerRankingMasterBracket(qualifiedPlayerIds);
+  const setScore = (matchId, score1, score2) => {
+    const match = bracket.matches.find(item => item.id === matchId);
+    match.score1 = score1;
+    match.score2 = score2;
+  };
+  setScore('master-qf-1', 6, 1); // p1
+  setScore('master-qf-2', 6, 2); // p4
+  setScore('master-qf-3', 6, 3); // p2
+  setScore('master-qf-4', 6, 4); // p3
+
+  const recomputed = recomputeSummerRankingMasterBracket(bracket);
+  const sf1 = recomputed.matches.find(match => match.id === 'master-sf-1');
+  const sf2 = recomputed.matches.find(match => match.id === 'master-sf-2');
+
+  assert.deepEqual([sf1?.player1Id, sf1?.player2Id], ['p1', 'p4']);
+  assert.deepEqual([sf2?.player1Id, sf2?.player2Id], ['p2', 'p3']);
 });
 
 test('Top 4 master bracket generates only semifinals and final', () => {
@@ -111,6 +132,16 @@ test('manual replacement is accepted for Top 1 and propagated to generated data'
   }, config);
 
   assert.deepEqual(selected, ['p3']);
+  const topOneMaster = createSummerRankingMasterData(['p3'], ['p3'], [], 'bracket');
+  assert.equal(topOneMaster.bracket?.isGenerated, true);
+  assert.deepEqual(topOneMaster.matches, []);
+
+  const fallbackConfig = normalizeRulesConfig({ masterSize: 2 });
+  const fallbackToAuto = getSummerRankingMasterQualifiedPlayerIds(ranking, {
+    manualQualifiedPlayerIds: ['p3', 'p3', 'unknown'],
+  }, fallbackConfig);
+
+  assert.deepEqual(fallbackToAuto, ['p1', 'p2']);
 
   const generated = createSummerRankingMasterData(['p1', 'p2', 'p3', 'p4'], undefined, [], 'bracket');
   const updated = createSummerRankingMasterData(['p5', 'p2', 'p3', 'p4'], ['p5', 'p2', 'p3', 'p4'], generated.matches, 'bracket');

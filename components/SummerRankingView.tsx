@@ -454,6 +454,9 @@ const getOpponentBandRowClass = (band: 'low' | 'medium' | 'high') => {
 const arraysEqual = (left: string[], right: string[]) =>
   left.length === right.length && left.every((item, index) => item === right[index]);
 
+const isSupportedMasterBracketSize = (size: number) =>
+  size === 1 || (size >= 2 && (size & (size - 1)) === 0);
+
 const normalizeMasterDraftSelection = (
   qualifiedPlayerIds: string[],
   validPlayerIds: Set<string>,
@@ -1067,7 +1070,8 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       ? undefined
       : normalizedQualifiedPlayerIds;
 
-    const shouldRebuildGeneratedMaster = isMasterGenerated && normalizedQualifiedPlayerIds.length >= 2;
+    const shouldRebuildGeneratedMaster = isMasterGenerated &&
+      (masterFormatDraft !== 'bracket' || isSupportedMasterBracketSize(normalizedQualifiedPlayerIds.length));
     const nextMaster = shouldRebuildGeneratedMaster
       ? createSummerRankingMasterData(
         normalizedQualifiedPlayerIds,
@@ -1092,7 +1096,8 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       new Set(masterCandidatePlayers.map(player => player.id)),
       effectiveConfig.masterSize,
     );
-    if (!isOrganizer || !normalizedQualifiedPlayerIds || normalizedQualifiedPlayerIds.length < 2) return;
+    if (!isOrganizer || !normalizedQualifiedPlayerIds) return;
+    if (masterFormatDraft === 'bracket' && !isSupportedMasterBracketSize(normalizedQualifiedPlayerIds.length)) return;
 
     const manualQualifiedPlayerIds = arraysEqual(normalizedQualifiedPlayerIds, autoQualifiedPlayerIds)
       ? undefined
@@ -1530,6 +1535,10 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   const masterNeedsRegeneration = isMasterGenerated && (
     !arraysEqual(currentMasterQualifiedPlayerIds, generatedMasterQualifiedPlayerIds) ||
     masterFormat !== masterFormatDraft
+  );
+  const bracketSizeSupported = useMemo(
+    () => isSupportedMasterBracketSize(effectiveConfig.masterSize),
+    [effectiveConfig.masterSize],
   );
   const visibleMasterMatches = useMemo(
     () =>
@@ -2757,6 +2766,11 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   Per salvare o generare il Master servono {effectiveConfig.masterSize} giocatori univoci e validi.
                 </div>
               )}
+              {masterFormatDraft === 'bracket' && !bracketSizeSupported && (
+                <div className="rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-4 text-sm text-yellow-200">
+                  Il formato tabellone supporta Top 1 oppure potenze di 2 (2, 4, 8, 16, ...). In alternativa usa il formato a gironi.
+                </div>
+              )}
 
               {masterNeedsRegeneration && (
                 <div className="rounded-lg border border-orange-500/40 bg-orange-500/10 p-4 text-sm text-orange-200">
@@ -2780,7 +2794,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                 </button>
                 <button
                   onClick={handleGenerateMaster}
-                  disabled={!hasValidMasterDraft || effectiveConfig.masterSize < 2}
+                  disabled={!hasValidMasterDraft || (masterFormatDraft === 'bracket' && !bracketSizeSupported)}
                   className="px-4 py-2 rounded bg-accent text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {isMasterGenerated ? 'Rigenera Master' : 'Genera Master'}
@@ -2803,8 +2817,10 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
               <p className="text-text-secondary mt-2">
                 {masterFormatDraft === 'groups'
                   ? 'Una volta confermati i qualificati, genera due gironi del Master finale con partite automatiche.'
-                  : effectiveConfig.masterSize <= 2
-                    ? 'Con almeno Top 2 puoi generare il Master con la sola finale.'
+                  : effectiveConfig.masterSize <= 1
+                    ? 'Con Top 1 puoi salvare un qualificato unico e sostituirlo manualmente quando serve.'
+                    : effectiveConfig.masterSize <= 2
+                      ? 'Con Top 2 il Master genera la finale diretta.'
                     : effectiveConfig.masterSize <= 4
                       ? 'Con Top 4 il Master genera direttamente semifinali e finale.'
                       : 'Una volta confermati i qualificati, genera il tabellone per ottenere quarti, semifinali, finale e finale 3°/4° posto.'}
@@ -2820,7 +2836,9 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                     <div>
                       <h3 className="text-xl font-bold text-accent">Tabellone Master finale</h3>
                       <p className="text-sm text-text-secondary mt-1">
-                        {effectiveConfig.masterSize <= 2
+                        {effectiveConfig.masterSize <= 1
+                          ? 'Qualificato unico gestibile manualmente.'
+                          : effectiveConfig.masterSize <= 2
                           ? 'Finale diretta tra i due qualificati.'
                           : effectiveConfig.masterSize <= 4
                             ? 'Semifinali con accoppiamenti standard (1vs4 e 2vs3) e finale.'
