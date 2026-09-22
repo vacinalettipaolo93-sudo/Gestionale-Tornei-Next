@@ -142,6 +142,7 @@ test('manual player override updates a quarterfinal slot and clears obsolete res
   assert.ok(updated.bracket);
   const updatedQf1 = updated.bracket.matches.find(match => match.id === 'master-qf-1');
   assert.deepEqual([updatedQf1.player1Id, updatedQf1.player2Id], ['p9', 'p8']);
+  assert.deepEqual([updatedQf1.manualPlayer1Id, updatedQf1.manualPlayer2Id], ['p9', 'p8']);
   assert.equal(updatedQf1.score1, null);
   assert.equal(updatedQf1.score2, null);
   assert.equal(updatedQf1.winnerId, null);

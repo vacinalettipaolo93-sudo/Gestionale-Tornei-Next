@@ -285,6 +285,13 @@ const resolveManualParticipant = (
 const hasAutomaticParticipants = (match: PlayoffMatch, bracket: PlayoffBracket) =>
   match.isBronzeFinal || (getBracketSourceMatches(bracket).get(match.id)?.length ?? 0) > 0;
 
+const getRoundDuplicateIds = (matches: PlayoffMatch[], round: number) => {
+  const playerIds = matches
+    .filter(match => match.round === round)
+    .flatMap(match => [match.player1Id, match.player2Id].filter((playerId): playerId is string => Boolean(playerId)));
+  return new Set(playerIds.filter((playerId, index, list) => list.indexOf(playerId) !== index));
+};
+
 export const getSummerRankingAutoQualifiedPlayerIds = (ranking: SummerRankingEntry[], config?: SummerRankingRulesConfig) => {
   const cfg = config ?? DEFAULT_RULES_CONFIG;
   return ranking
@@ -418,12 +425,22 @@ export const recomputeSummerRankingMasterBracket = (bracket: PlayoffBracket): Pl
   const sortedMatches = nextBracket.matches
     .slice()
     .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex);
+  const nextMatchSources = getBracketSourceMatches(nextBracket);
+
+  sortedMatches
+    .filter(match => !match.isBronzeFinal && (nextMatchSources.get(match.id)?.length ?? 0) === 0)
+    .forEach(match => {
+      if (match.manualPlayer1Id === undefined && match.manualPlayer2Id === undefined) return;
+      setParticipants(
+        match,
+        resolveManualParticipant(match.manualPlayer1Id, match.player1Id ?? null),
+        resolveManualParticipant(match.manualPlayer2Id, match.player2Id ?? null),
+      );
+    });
 
   sortedMatches.forEach(match => {
     match.winnerId = getWinnerId(match);
   });
-
-  const nextMatchSources = getBracketSourceMatches(nextBracket);
 
   sortedMatches
     .filter(match => !match.isBronzeFinal)
@@ -467,6 +484,7 @@ export const updateSummerRankingMasterBracketParticipants = ({
   player2Id: string | null | undefined;
   validPlayerIds: string[];
 }) => {
+  const previousBracket = recomputeSummerRankingMasterBracket(bracket);
   const nextBracket = JSON.parse(JSON.stringify(bracket)) as PlayoffBracket;
   const targetMatch = nextBracket.matches.find(match => match.id === matchId);
   if (!targetMatch) {
@@ -486,6 +504,8 @@ export const updateSummerRankingMasterBracketParticipants = ({
     targetMatch.manualPlayer1Id = player1Id;
     targetMatch.manualPlayer2Id = player2Id;
   } else {
+    targetMatch.manualPlayer1Id = player1Id;
+    targetMatch.manualPlayer2Id = player2Id;
     setParticipants(
       targetMatch,
       player1Id === undefined ? targetMatch.player1Id : player1Id,
@@ -499,11 +519,10 @@ export const updateSummerRankingMasterBracketParticipants = ({
     return { error: 'Partita del tabellone non trovata.' };
   }
 
-  const duplicateIds = recomputedBracket.matches
-    .filter(match => match.round === updatedTargetMatch.round)
-    .flatMap(match => [match.player1Id, match.player2Id].filter((playerId): playerId is string => Boolean(playerId)))
-    .filter((playerId, index, list) => list.indexOf(playerId) !== index);
-  if (duplicateIds.length > 0) {
+  const previousDuplicateIds = getRoundDuplicateIds(previousBracket.matches, updatedTargetMatch.round);
+  const nextDuplicateIds = getRoundDuplicateIds(recomputedBracket.matches, updatedTargetMatch.round);
+  const introducedDuplicateIds = [...nextDuplicateIds].filter(playerId => !previousDuplicateIds.has(playerId));
+  if (introducedDuplicateIds.length > 0) {
     return { error: 'Non sono ammessi duplicati nello stesso turno del tabellone.' };
   }
 
