@@ -83,6 +83,8 @@ export interface PlayoffMatch {
   matchIndex: number;
   player1Id: string | null;
   player2Id: string | null;
+  manualPlayer1Id?: string | null;
+  manualPlayer2Id?: string | null;
   score1: number | null;
   score2: number | null;
   winnerId: string | null;
