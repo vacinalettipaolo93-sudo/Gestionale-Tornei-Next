@@ -282,9 +282,6 @@ const resolveManualParticipant = (
   autoPlayerId: string | null,
 ) => (manualPlayerId === undefined ? autoPlayerId : manualPlayerId);
 
-const hasAutomaticParticipants = (match: PlayoffMatch, bracket: PlayoffBracket) =>
-  match.isBronzeFinal || (getBracketSourceMatches(bracket).get(match.id)?.length ?? 0) > 0;
-
 const getRoundDuplicateIds = (matches: PlayoffMatch[], round: number) => {
   const playerIds = matches
     .filter(match => match.round === round)
@@ -486,6 +483,7 @@ export const updateSummerRankingMasterBracketParticipants = ({
 }) => {
   const previousBracket = recomputeSummerRankingMasterBracket(bracket);
   const nextBracket = JSON.parse(JSON.stringify(bracket)) as PlayoffBracket;
+  const nextMatchSources = getBracketSourceMatches(nextBracket);
   const targetMatch = nextBracket.matches.find(match => match.id === matchId);
   if (!targetMatch) {
     return { error: 'Partita del tabellone non trovata.' };
@@ -503,7 +501,8 @@ export const updateSummerRankingMasterBracketParticipants = ({
   targetMatch.manualPlayer1Id = player1Id;
   targetMatch.manualPlayer2Id = player2Id;
 
-  if (!hasAutomaticParticipants(targetMatch, nextBracket)) {
+  const hasAutomaticParticipants = targetMatch.isBronzeFinal || (nextMatchSources.get(targetMatch.id)?.length ?? 0) > 0;
+  if (!hasAutomaticParticipants) {
     setParticipants(
       targetMatch,
       player1Id === undefined ? targetMatch.player1Id : player1Id,

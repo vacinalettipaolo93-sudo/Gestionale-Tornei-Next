@@ -3150,7 +3150,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                         </div>
 
                         <div className="flex flex-wrap gap-2">
-                          {isOrganizer && masterFormat === 'bracket' && editingMasterPlayersMatchId !== match.id && (
+                          {isOrganizer && masterFormat === 'bracket' && editingMasterPlayersMatchId !== match.id && editingMasterMatchId !== match.id && (
                             <button onClick={() => openEditMasterPlayers(match)} className="px-3 py-1.5 rounded bg-primary border border-tertiary text-xs font-semibold">
                               Modifica giocatori
                             </button>
@@ -3323,7 +3323,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                             </td>
                             <td className="py-4 pr-3">
                               <div className="flex flex-wrap gap-2">
-                                {isOrganizer && masterFormat === 'bracket' && editingMasterPlayersMatchId !== match.id && (
+                                {isOrganizer && masterFormat === 'bracket' && editingMasterPlayersMatchId !== match.id && editingMasterMatchId !== match.id && (
                                   <button
                                     onClick={() => openEditMasterPlayers(match)}
                                     className="px-3 py-1 rounded bg-primary border border-tertiary text-xs font-semibold"
