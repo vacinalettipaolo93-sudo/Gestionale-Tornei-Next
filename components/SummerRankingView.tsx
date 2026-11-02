@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { RankingMatchFinder } from './MatchFinder';
 import {
   type SummerAvailabilityByDay,
   type SummerAvailabilityStatus,
@@ -2443,6 +2444,16 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
 
       {activeTab === 'matches' && (
         <>
+          {!isOrganizer && currentPlayer && (
+            <RankingMatchFinder
+              currentPlayerId={currentPlayer.id}
+              opponents={eligibleOpponents}
+              availabilities={rankingData.availabilities}
+              onAvailability={() => setActiveTab('availability')}
+              onPlayerContact={onPlayerContact}
+              onChallenge={openChallengeModal}
+            />
+          )}
           <div className="bg-secondary rounded-xl shadow-lg p-4 sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap gap-2">

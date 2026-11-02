@@ -836,6 +836,7 @@ const App: React.FC = () => {
               rankingData={rankingData}
               isOrganizer={isOrganizer}
               loggedInPlayerId={loggedInPlayerId}
+              onPlayerContact={setContactPlayer}
               onSaveRankingData={(nextData) => saveEventRankingData(currentEventState.id, 'ranking_padel_individuale', nextData)}
               onOpenPlayersAdmin={isOrganizer ? () => setCurrentView('playersAdmin') : undefined}
               title={`${currentEventState.name} • Paitone Arena League`}
