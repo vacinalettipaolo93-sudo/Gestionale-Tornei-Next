@@ -41,6 +41,10 @@ export default function AdminMatchCounts({
 }) {
   // filter can be number or the special string 'completed'
   const [filter, setFilter] = useState<number | "completed">(defaultMax);
+  const [tournamentId, setTournamentId] = useState('');
+  const [groupId, setGroupId] = useState('');
+  const selectedTournament = event.tournaments.find(tournament => tournament.id === tournamentId);
+  const selectedGroup = selectedTournament?.groups.find(group => group.id === groupId);
 
   // Compute full list of rows (no filter applied here)
   const allRows: Row[] = useMemo(() => {
@@ -150,14 +154,18 @@ export default function AdminMatchCounts({
 
   // Derive displayed rows based on filter
   const displayedRows = useMemo(() => {
+    const scopedRows = allRows.filter(row =>
+      (!selectedTournament || row.tournamentId === selectedTournament.id)
+      && (!selectedGroup || row.groupId === selectedGroup.id)
+    );
     if (filter === "completed") {
-      return allRows.filter(r => r.remaining === 0).sort((a, b) => a.name.localeCompare(b.name));
+      return scopedRows.filter(r => r.remaining === 0).sort((a, b) => a.name.localeCompare(b.name));
     }
     const num = Number(filter);
-    return allRows
+    return scopedRows
       .filter(r => r.played <= num)
       .sort((a, b) => a.played - b.played || a.name.localeCompare(b.name));
-  }, [allRows, filter]);
+  }, [allRows, filter, selectedTournament, selectedGroup]);
 
   // Build grouping structure depending on filter
   const grouped = useMemo(() => {
@@ -183,9 +191,30 @@ export default function AdminMatchCounts({
 
   return (
     <div className="bg-secondary/90 p-4 rounded-xl mb-6 border border-tertiary">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
         <h3 className="text-xl font-bold text-accent">Controllo partite giocatori (Admin)</h3>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="matchTournamentFilter" className="text-sm text-text-secondary">Torneo:</label>
+          <select
+            id="matchTournamentFilter"
+            value={selectedTournament?.id ?? ''}
+            onChange={e => { setTournamentId(e.target.value); setGroupId(''); }}
+            className="bg-primary border border-tertiary text-text-primary rounded px-2 py-1"
+          >
+            <option value="">Tutti i tornei</option>
+            {event.tournaments.map(tournament => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
+          </select>
+          <label htmlFor="matchGroupFilter" className="text-sm text-text-secondary">Girone:</label>
+          <select
+            id="matchGroupFilter"
+            value={selectedGroup?.id ?? ''}
+            onChange={e => setGroupId(e.target.value)}
+            disabled={!selectedTournament}
+            className="bg-primary border border-tertiary text-text-primary rounded px-2 py-1 disabled:opacity-50"
+          >
+            <option value="">{selectedTournament ? 'Tutti i gironi' : 'Seleziona prima un torneo'}</option>
+            {(selectedTournament?.groups ?? []).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+          </select>
           <label htmlFor="matchFilter" className="text-sm text-text-secondary mr-2">Mostra:</label>
           <select
             id="matchFilter"
@@ -222,7 +251,7 @@ export default function AdminMatchCounts({
                   </thead>
                   <tbody>
                     {grouped.completed.map(r => (
-                      <tr key={r.playerId} className="border-t border-tertiary/40">
+                      <tr key={`${r.tournamentId}:${r.groupId}:${r.playerId}`} className="border-t border-tertiary/40">
                         <td
                           className={`py-2 ${r.tournamentId ? 'cursor-pointer text-accent hover:underline' : ''}`}
                           onClick={() => r.tournamentId && handlePlayerClick(r)}
@@ -271,7 +300,7 @@ export default function AdminMatchCounts({
                       </thead>
                       <tbody>
                         {groupRows.map(r => (
-                          <tr key={r.playerId} className="border-t border-tertiary/40">
+                          <tr key={`${r.tournamentId}:${r.groupId}:${r.playerId}`} className="border-t border-tertiary/40">
                             <td
                               className={`py-2 ${r.tournamentId ? 'cursor-pointer text-accent hover:underline' : ''}`}
                               onClick={() => r.tournamentId && handlePlayerClick(r)}

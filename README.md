@@ -39,6 +39,8 @@ Nei tornei vengono proposti solo gli avversari di incontri non completati del to
 
 ## Slot e prenotazioni dei tornei Tennis e Padel
 
+Nel tab amministratore **Controllo partite**, il filtro del numero di partite (incluso **Completato**) si combina con **Torneo** e **Girone**. Selezionare un torneo per vedere tutti i suoi gironi o sceglierne uno specifico; cambiando torneo il girone viene azzerato. **Tutti i tornei** ripristina la vista complessiva dell'evento.
+
 Nella pagina amministratore dell'evento, accanto a **Tornei** e **Lista giocatori**, le schede **Slot orari Canottieri Salò** e **Slot orari Paitone Arena** aggiungono slot liberi con giorno, ora e campo al calendario dell'evento, senza selezionare un torneo. Per inserire più campi alla stessa ora, aggiungere uno slot per ciascun campo. I nuovi slot sono salvati in `events/{eventId}.globalTimeSlots` con un identificativo del centro e compaiono in tutti i tornei dell'evento; gli slot prenotati non sono eliminabili finché non viene annullata la relativa prenotazione.
 
 Nel tab **Partite**, **Prenota** mostra prima due riquadri per scegliere il centro, poi gli slot liberi raggruppati per giorno con orario e campo. La conferma salva sulla partita centro, data, ora, campo e identificativo dello slot. Anche **Modifica prenotazione** usa lo stesso percorso. Prenotare un campo a un dato orario lo rende occupato in tutti i tornei dell'evento (gironi, playoff e consolazione); annullare o spostare la prenotazione libera il vecchio slot per tutti. Eventi diversi restano completamente indipendenti.
