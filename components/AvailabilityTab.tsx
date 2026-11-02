@@ -71,7 +71,8 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     return m;
   }, [futureSlots]);
 
-  const { loading, error, slotPrefMap, dateUnavailMap } = useTournamentAvailability(participantIds);
+  const availabilityScope = { eventId: event.id, tournamentId: tournament.id };
+  const { loading, error, slotPrefMap, dateUnavailMap } = useTournamentAvailability(participantIds, availabilityScope);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Toggle slot preference: write then local snapshot will update from listener
@@ -101,9 +102,9 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     setSaveError(null);
     try {
       if (!has) {
-        await setDateUnavailability(loggedInPlayerId, dateKey, true);
+        await setDateUnavailability(loggedInPlayerId, dateKey, true, availabilityScope);
       } else {
-        await removeDateUnavailability(loggedInPlayerId, dateKey);
+        await removeDateUnavailability(loggedInPlayerId, dateKey, availabilityScope);
       }
     } catch (err) {
       console.error("Errore salvataggio non-disponibilità per data:", err);

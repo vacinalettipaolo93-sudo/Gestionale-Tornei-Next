@@ -60,6 +60,13 @@ export interface DateUnavailability {
   unavailable: boolean; // true = not available for that date
   createdAt?: any;
   updatedAt?: any;
+  eventId?: string;
+  tournamentId?: string;
+}
+
+export interface TournamentAvailabilityScope {
+  eventId: string;
+  tournamentId: string;
 }
 
 // --- collections ---
@@ -125,18 +132,20 @@ export async function getGlobalAvailabilitiesForPlayers(playerIds: string[]): Pr
 }
 
 // --- DATE unavailabilities (per-player per-date) ---
-function docIdDateUnavail(playerId: string, date: string) {
-  return `${playerId}_${date}`;
+function docIdDateUnavail(playerId: string, date: string, scope?: TournamentAvailabilityScope) {
+  return scope
+    ? `${scope.eventId}_${scope.tournamentId}_${playerId}_${date}`
+    : `${playerId}_${date}`;
 }
 
-export async function setDateUnavailability(playerId: string, date: string, unavailable: boolean): Promise<void> {
-  const id = docIdDateUnavail(playerId, date);
+export async function setDateUnavailability(playerId: string, date: string, unavailable: boolean, scope?: TournamentAvailabilityScope): Promise<void> {
+  const id = docIdDateUnavail(playerId, date, scope);
   const ref = doc(db, DATE_UNAVAIL_COL, id);
-  await setDoc(ref, { playerId, date, unavailable, updatedAt: serverTimestamp(), createdAt: serverTimestamp() }, { merge: true });
+  await setDoc(ref, { playerId, date, unavailable, ...(scope ?? {}), updatedAt: serverTimestamp(), createdAt: serverTimestamp() }, { merge: true });
 }
 
-export async function removeDateUnavailability(playerId: string, date: string): Promise<void> {
-  const id = docIdDateUnavail(playerId, date);
+export async function removeDateUnavailability(playerId: string, date: string, scope?: TournamentAvailabilityScope): Promise<void> {
+  const id = docIdDateUnavail(playerId, date, scope);
   const ref = doc(db, DATE_UNAVAIL_COL, id);
   await deleteDoc(ref);
 }

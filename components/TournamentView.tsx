@@ -5,7 +5,6 @@ import {
   type Event,
   type Tournament,
   type Match,
-  type TimeSlot,
   type Player,
   type PlayoffBracket,
   type PlayoffMatch,
@@ -21,6 +20,8 @@ import ConsolationBracket from './ConsolationBracket';
 import PlayerManagement from './PlayerManagement';
 import AvailabilityTab from './AvailabilityTab';
 import { TournamentMatchFinder } from './MatchFinder';
+import TournamentBookingModal from './TournamentBookingModal';
+import { saveTournamentSlotAction } from '../services/tournamentBookingService';
 import { db } from "../firebase";
 import { updateDoc, doc } from "firebase/firestore";
 import { getCompetitorName, getTeamForPlayer, getTournamentCompetitors, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
@@ -212,104 +213,16 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   const [score2, setScore2] = useState<string>("");
 
   const [bookingMatch, setBookingMatch] = useState<Match | null>(null);
-  const [selectedSlotId, setSelectedSlotId] = useState<string>("");
 
   const [reschedulingMatch, setReschedulingMatch] = useState<Match | null>(null);
-  const [rescheduleSlotId, setRescheduleSlotId] = useState<string>("");
 
   const [deletingMatch, setDeletingMatch] = useState<Match | null>(null);
 
   const [bookingError, setBookingError] = useState<string>("");
 
-  // prenotazione dal tab Slot Disponibili (solo gironi, come era)
-  const [slotToBook, setSlotToBook] = useState<null | TimeSlot>(null);
-  const myPendingMatches = selectedGroup
-    ? selectedGroup.matches.filter(m =>
-      m.status === "pending" &&
-      (m.player1Id === loggedInCompetitorId || m.player2Id === loggedInCompetitorId))
-    : [];
-
   // --- TRIGGER RECTS for anchored modals ---
   const [editingTriggerRect, setEditingTriggerRect] = useState<DOMRect | null>(null);
-  const [bookingTriggerRect, setBookingTriggerRect] = useState<DOMRect | null>(null);
-  const [rescheduleTriggerRect, setRescheduleTriggerRect] = useState<DOMRect | null>(null);
   const [deletingTriggerRect, setDeletingTriggerRect] = useState<DOMRect | null>(null);
-  const [slotToBookTriggerRect, setSlotToBookTriggerRect] = useState<DOMRect | null>(null);
-
-  const handleClickBookSlot = (slot: TimeSlot, triggerRect?: DOMRect | null) => {
-    setSlotToBook(slot);
-    setSlotToBookTriggerRect(triggerRect ?? null);
-  };
-
-  const handleConfirmBookSlot = async (matchId: string) => {
-    const match = selectedGroup?.matches.find(m => m.id === matchId);
-    if (!match || !slotToBook) return;
-
-    setBookingError("");
-    const updatedMatch: Match = {
-      ...match,
-      status: "scheduled",
-      scheduledTime: new Date(slotToBook.start).toISOString(),
-      location: slotToBook.location ?? "",
-      field: slotToBook.field ?? (slotToBook.location ?? ""),
-      slotId: slotToBook.id
-    };
-
-    const updatedGroups = tournament.groups.map(g =>
-      g.id === selectedGroup?.id
-        ? { ...g, matches: g.matches.map(m => m.id === match.id ? updatedMatch : m) }
-        : g
-    );
-
-    const updatedTournaments = event.tournaments.map(t0 =>
-      t0.id === tournament.id ? { ...t0, groups: updatedGroups } : t0
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setSlotToBook(null);
-    setSlotToBookTriggerRect(null);
-  };
-
-  // Slot locking: now includes groups + playoffMatches + consolationMatches across ALL tournaments
-  function getAllBookedSlotIds(): string[] {
-    return event.tournaments.flatMap(t0 => {
-      const fromGroups = (t0.groups ?? []).flatMap(g =>
-        (g.matches ?? [])
-          .filter(m => m.slotId && (m.status === "scheduled" || m.status === "completed"))
-          .map(m => m.slotId!)
-      );
-
-      const fromPlayoff = (t0 as TournamentWithExtraMatches).playoffMatches
-        ? (t0 as TournamentWithExtraMatches).playoffMatches!
-          .filter(m => m.slotId && (m.status === "scheduled" || m.status === "completed"))
-          .map(m => m.slotId!)
-        : [];
-
-      const fromCons = (t0 as TournamentWithExtraMatches).consolationMatches
-        ? (t0 as TournamentWithExtraMatches).consolationMatches!
-          .filter(m => m.slotId && (m.status === "scheduled" || m.status === "completed"))
-          .map(m => m.slotId!)
-        : [];
-
-      return [...fromGroups, ...fromPlayoff, ...fromCons];
-    });
-  }
-
-  function getAvailableSlots() {
-    const globalSlots = Array.isArray(event.globalTimeSlots) ? event.globalTimeSlots : [];
-    const booked = getAllBookedSlotIds();
-    const now = new Date();
-    return globalSlots.filter(slot => {
-      const startIso = (slot as any).start ?? (slot as any).time ?? null;
-      if (!startIso) return false;
-      const startDate = new Date(startIso);
-      if (isNaN(startDate.getTime())) return false;
-      if (startDate.getTime() <= now.getTime()) return false;
-      return !booked.includes(slot.id);
-    });
-  }
 
   const handlePlayerContact = (player: { phone?: string } | Player) => {
     const p = player as Player;
@@ -573,256 +486,35 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   }
 
   // booking
-  const handleBookMatch = (match: Match, triggerRect?: DOMRect | null) => {
+  const handleBookMatch = (match: Match) => {
     setBookingMatch(match);
-    setBookingTriggerRect(triggerRect ?? null);
-    setSelectedSlotId("");
     setBookingError("");
   };
-
-  async function saveMatchBooking(match: Match) {
-    const globalSlots = Array.isArray(event.globalTimeSlots) ? event.globalTimeSlots : [];
-    const allBookedSlotIds = getAllBookedSlotIds();
-
-    if (!selectedSlotId) {
-      setBookingError("Seleziona uno slot orario.");
-      return;
-    }
-    if (allBookedSlotIds.includes(selectedSlotId)) {
-      setBookingError("Slot già prenotato, scegli un altro slot.");
-      return;
-    }
-
-    const timeSlot = globalSlots.find(s => s.id === selectedSlotId);
-    if (!timeSlot) {
-      setBookingError("Slot non trovato tra quelli globali.");
-      return;
-    }
-    const dateObj = new Date(timeSlot.start);
-    if (!timeSlot.start || isNaN(dateObj.getTime())) {
-      setBookingError("Invalid data - campo orario non valido.");
-      return;
-    }
-
-    const updatedMatch: Match = {
-      ...match,
-      status: "scheduled",
-      scheduledTime: dateObj.toISOString(),
-      slotId: timeSlot.id,
-      location: timeSlot.location ?? "",
-      field: timeSlot.field ?? (timeSlot.location ?? ""),
-    };
-
-    // PLAYOFF
-    if (isPlayoffLeagueMatchId(match.id)) {
-      const current = Array.isArray(t.playoffMatches) ? t.playoffMatches : [];
-      const updatedPlayoffMatches = current.map(m => m.id === match.id ? updatedMatch : m);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, playoffMatches: updatedPlayoffMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setBookingMatch(null);
-      setBookingTriggerRect(null);
-      setSelectedSlotId("");
-      setBookingError("");
-      return;
-    }
-
-    // CONSOLATION
-    if (isConsolationLeagueMatchId(match.id)) {
-      const current = Array.isArray(t.consolationMatches) ? t.consolationMatches : [];
-      const updatedConsolationMatches = current.map(m => m.id === match.id ? updatedMatch : m);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, consolationMatches: updatedConsolationMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setBookingMatch(null);
-      setBookingTriggerRect(null);
-      setSelectedSlotId("");
-      setBookingError("");
-      return;
-    }
-
-    // GROUP
-    const container = findMatchContainerInTournament(tournament, match.id);
-    if (!container || container.kind !== 'group' || !container.groupId) return;
-
-    const updatedGroups = tournament.groups.map(g =>
-      g.id === container.groupId ? { ...g, matches: g.matches.map(m => m.id === match.id ? updatedMatch : m) } : g
-    );
-
-    const updatedTournaments = event.tournaments.map(t0 =>
-      t0.id === tournament.id ? { ...t0, groups: updatedGroups } : t0
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setBookingMatch(null);
-    setBookingTriggerRect(null);
-    setSelectedSlotId("");
-    setBookingError("");
-  }
 
   // reschedule
-  const handleRescheduleMatch = (match: Match, triggerRect?: DOMRect | null) => {
+  const handleRescheduleMatch = (match: Match) => {
     setReschedulingMatch(match);
-    setRescheduleTriggerRect(triggerRect ?? null);
-    setRescheduleSlotId("");
-  };
-
-  async function saveRescheduleMatch(match: Match) {
-    const globalSlots = Array.isArray(event.globalTimeSlots) ? event.globalTimeSlots : [];
-    const allBookedSlotIds = getAllBookedSlotIds();
-
-    if (!rescheduleSlotId) {
-      setBookingError("Seleziona uno slot orario.");
-      return;
-    }
-    if (allBookedSlotIds.includes(rescheduleSlotId)) {
-      setBookingError("Slot già prenotato da un'altra partita.");
-      return;
-    }
-
-    const timeSlot = globalSlots.find(s => s.id === rescheduleSlotId);
-    const dateObj = timeSlot ? new Date(timeSlot.start) : null;
-
-    const updatedMatch: Match = {
-      ...match,
-      status: "scheduled",
-      scheduledTime: timeSlot?.start ? dateObj?.toISOString() ?? "" : "",
-      slotId: timeSlot?.id ?? "",
-      location: timeSlot?.location ?? "",
-      field: timeSlot?.field ?? (timeSlot?.location ?? ""),
-    };
-
-    // PLAYOFF
-    if (isPlayoffLeagueMatchId(match.id)) {
-      const current = Array.isArray(t.playoffMatches) ? t.playoffMatches : [];
-      const updatedPlayoffMatches = current.map(m => m.id === match.id ? updatedMatch : m);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, playoffMatches: updatedPlayoffMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setReschedulingMatch(null);
-      setRescheduleTriggerRect(null);
-      setRescheduleSlotId("");
-      setBookingError("");
-      return;
-    }
-
-    // CONSOLATION
-    if (isConsolationLeagueMatchId(match.id)) {
-      const current = Array.isArray(t.consolationMatches) ? t.consolationMatches : [];
-      const updatedConsolationMatches = current.map(m => m.id === match.id ? updatedMatch : m);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, consolationMatches: updatedConsolationMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setReschedulingMatch(null);
-      setRescheduleTriggerRect(null);
-      setRescheduleSlotId("");
-      setBookingError("");
-      return;
-    }
-
-    // GROUP
-    const container = findMatchContainerInTournament(tournament, match.id);
-    if (!container || container.kind !== 'group' || !container.groupId) return;
-
-    const updatedGroups = tournament.groups.map(g =>
-      g.id === container.groupId ? { ...g, matches: g.matches.map(m => m.id === match.id ? updatedMatch : m) } : g
-    );
-
-    const updatedTournaments = event.tournaments.map(t0 =>
-      t0.id === tournament.id ? { ...t0, groups: updatedGroups } : t0
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setReschedulingMatch(null);
-    setRescheduleTriggerRect(null);
-    setRescheduleSlotId("");
     setBookingError("");
-  }
+  };
 
   // cancel booking
   async function handleCancelBooking(match: Match) {
-    const updatedMatch: Match = { ...match, status: "pending", scheduledTime: null as any, slotId: null as any, location: "", field: "" };
-
-    // PLAYOFF
-    if (isPlayoffLeagueMatchId(match.id)) {
-      const current = Array.isArray(t.playoffMatches) ? t.playoffMatches : [];
-      const updatedPlayoffMatches = current.map(m => m.id === match.id ? updatedMatch : m);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, playoffMatches: updatedPlayoffMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-      return;
+    setBookingError("");
+    try {
+      await saveTournamentSlotAction(event.id, tournament.id, { type: 'cancel', matchId: match.id }, {
+        isOrganizer, playerId: loggedInPlayerId,
+      });
+    } catch (cause) {
+      setBookingError(cause instanceof Error ? cause.message : 'Impossibile annullare la prenotazione.');
     }
-
-    // CONSOLATION
-    if (isConsolationLeagueMatchId(match.id)) {
-      const current = Array.isArray(t.consolationMatches) ? t.consolationMatches : [];
-      const updatedConsolationMatches = current.map(m => m.id === match.id ? updatedMatch : m);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, consolationMatches: updatedConsolationMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-      return;
-    }
-
-    // GROUP
-    const container = findMatchContainerInTournament(tournament, match.id);
-    if (!container || container.kind !== 'group' || !container.groupId) return;
-
-    const updatedGroups = tournament.groups.map(g =>
-      g.id === container.groupId ? { ...g, matches: g.matches.map(m => m.id === match.id ? updatedMatch : m) } : g
-    );
-
-    const updatedTournaments = event.tournaments.map(t0 =>
-      t0.id === tournament.id ? { ...t0, groups: updatedGroups } : t0
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
   }
 
   // --- MODAL ANCHORING LOGIC (UNCHANGED FROM YOUR FILE) ---
   const editingModalRef = useRef<HTMLDivElement | null>(null);
-  const bookingModalRef = useRef<HTMLDivElement | null>(null);
-  const rescheduleModalRef = useRef<HTMLDivElement | null>(null);
   const deletingModalRef = useRef<HTMLDivElement | null>(null);
-  const slotToBookModalRef = useRef<HTMLDivElement | null>(null);
 
   const [editingModalStyle, setEditingModalStyle] = useState<React.CSSProperties | undefined>(undefined);
-  const [bookingModalStyle, setBookingModalStyle] = useState<React.CSSProperties | undefined>(undefined);
-  const [rescheduleModalStyle, setRescheduleModalStyle] = useState<React.CSSProperties | undefined>(undefined);
   const [deletingModalStyle, setDeletingModalStyle] = useState<React.CSSProperties | undefined>(undefined);
-  const [slotToBookModalStyle, setSlotToBookModalStyle] = useState<React.CSSProperties | undefined>(undefined);
 
   function computeAnchorStyle(triggerRect: DOMRect, modalRect: DOMRect) {
     const margin = 8;
@@ -910,34 +602,6 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   }, [editingMatch, editingTriggerRect]);
 
   useEffect(() => {
-    if (bookingMatch) {
-      anchorModal(bookingModalRef, setBookingModalStyle, bookingTriggerRect);
-      const onScroll = () => anchorModal(bookingModalRef, setBookingModalStyle, bookingTriggerRect);
-      window.addEventListener('scroll', onScroll, true);
-      window.addEventListener('resize', onScroll);
-      return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
-    } else {
-      if (bookingModalRef.current) bookingModalRef.current.style.cssText = '';
-      setBookingModalStyle(undefined);
-      setBookingTriggerRect(null);
-    }
-  }, [bookingMatch, bookingTriggerRect]);
-
-  useEffect(() => {
-    if (reschedulingMatch) {
-      anchorModal(rescheduleModalRef, setRescheduleModalStyle, rescheduleTriggerRect);
-      const onScroll = () => anchorModal(rescheduleModalRef, setRescheduleModalStyle, rescheduleTriggerRect);
-      window.addEventListener('scroll', onScroll, true);
-      window.addEventListener('resize', onScroll);
-      return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
-    } else {
-      if (rescheduleModalRef.current) rescheduleModalRef.current.style.cssText = '';
-      setRescheduleModalStyle(undefined);
-      setRescheduleTriggerRect(null);
-    }
-  }, [reschedulingMatch, rescheduleTriggerRect]);
-
-  useEffect(() => {
     if (deletingMatch) {
       anchorModal(deletingModalRef, setDeletingModalStyle, deletingTriggerRect);
       const onScroll = () => anchorModal(deletingModalRef, setDeletingModalStyle, deletingTriggerRect);
@@ -950,20 +614,6 @@ const TournamentView: React.FC<TournamentViewProps> = ({
       setDeletingTriggerRect(null);
     }
   }, [deletingMatch, deletingTriggerRect]);
-
-  useEffect(() => {
-    if (slotToBook && myPendingMatches.length > 0) {
-      anchorModal(slotToBookModalRef, setSlotToBookModalStyle, slotToBookTriggerRect);
-      const onScroll = () => anchorModal(slotToBookModalRef, setSlotToBookModalStyle, slotToBookTriggerRect);
-      window.addEventListener('scroll', onScroll, true);
-      window.addEventListener('resize', onScroll);
-      return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
-    } else {
-      if (slotToBookModalRef.current) slotToBookModalRef.current.style.cssText = '';
-      setSlotToBookModalStyle(undefined);
-      setSlotToBookTriggerRect(null);
-    }
-  }, [slotToBook, myPendingMatches.length, slotToBookTriggerRect]);
 
   const modalBackdrop = "fixed inset-0 bg-black/70 z-50";
   const modalBox = "bg-secondary rounded-xl shadow-2xl p-6 w-full max-w-md border border-tertiary";
@@ -1110,6 +760,7 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
         {activeTab === 'matches' && (
           <div className="space-y-10">
+            {bookingError && <p role="alert" className="text-red-400">{bookingError}</p>}
             {!isOrganizer && loggedInPlayerId && (
               <TournamentMatchFinder
                 event={event}
@@ -1203,53 +854,28 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
             {bookingMatch && (
               <Portal>
-                <div className={modalBackdrop} role="dialog" aria-modal="true">
-                  <div ref={bookingModalRef} style={bookingModalStyle} className={modalBox}>
-                    <h4 className="mb-4 font-bold text-lg text-accent">Prenota Partita</h4>
-                    <div className="flex flex-col gap-4">
-                      <label className="font-bold mb-1 text-white">Scegli uno slot libero:</label>
-                      <select value={selectedSlotId} onChange={e => { setSelectedSlotId(e.target.value); setBookingError(""); }} className="border px-3 py-2 rounded font-bold text-white bg-primary">
-                        <option value="">Seleziona uno slot</option>
-                        {getAvailableSlots().map(slot => (
-                          <option key={slot.id} value={slot.id}>
-                            {new Date(slot.start).toLocaleString("it-IT")}{slot.location ? ` - ${slot.location}` : ""}{slot.field ? ` - ${slot.field}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {bookingError && <div className="text-red-500 font-bold">{bookingError}</div>}
-                      <div className="flex gap-2 justify-end pt-3">
-                        <button onClick={() => { setBookingMatch(null); setBookingTriggerRect(null); setBookingError(""); setSelectedSlotId(""); }} className="bg-tertiary px-4 py-2 rounded">Annulla</button>
-                        <button disabled={!selectedSlotId} onClick={async () => { if (bookingMatch) { await saveMatchBooking(bookingMatch); } }} className="bg-highlight text-white px-4 py-2 rounded">Prenota</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <TournamentBookingModal
+                  event={event}
+                  tournament={tournament}
+                  match={bookingMatch}
+                  isOrganizer={isOrganizer}
+                  loggedInPlayerId={loggedInPlayerId}
+                  onClose={() => setBookingMatch(null)}
+                />
               </Portal>
             )}
 
             {reschedulingMatch && (
               <Portal>
-                <div className={modalBackdrop} role="dialog" aria-modal="true">
-                  <div ref={rescheduleModalRef} style={rescheduleModalStyle} className={modalBox}>
-                    <h4 className="mb-4 font-bold text-lg text-accent">Modifica Prenotazione</h4>
-                    <div className="flex flex-col gap-4">
-                      <label className="font-bold mb-1 text-white">Scegli uno slot libero:</label>
-                      <select value={rescheduleSlotId} onChange={e => { setRescheduleSlotId(e.target.value); setBookingError(""); }} className="border px-3 py-2 rounded font-bold text-white bg-primary">
-                        <option value="">Seleziona uno slot</option>
-                        {getAvailableSlots().map(slot => (
-                          <option key={slot.id} value={slot.id}>
-                            {new Date(slot.start).toLocaleString("it-IT")}{slot.location ? ` - ${slot.location}` : ""}{slot.field ? ` - ${slot.field}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {bookingError && <div className="text-red-500 font-bold">{bookingError}</div>}
-                      <div className="flex gap-2 justify-end pt-3">
-                        <button onClick={() => { setReschedulingMatch(null); setRescheduleTriggerRect(null); setRescheduleSlotId(""); setBookingError(""); }} className="bg-tertiary px-4 py-2 rounded">Annulla</button>
-                        <button disabled={!rescheduleSlotId} onClick={async () => { if (reschedulingMatch) { await saveRescheduleMatch(reschedulingMatch); } }} className="bg-highlight text-white px-4 py-2 rounded">Salva</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <TournamentBookingModal
+                  event={event}
+                  tournament={tournament}
+                  match={reschedulingMatch}
+                  isOrganizer={isOrganizer}
+                  loggedInPlayerId={loggedInPlayerId}
+                  reschedule
+                  onClose={() => setReschedulingMatch(null)}
+                />
               </Portal>
             )}
 

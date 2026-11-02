@@ -18,6 +18,9 @@ writeFileSync(finderPath, readFileSync(finderPath, 'utf8')
   .replaceAll("'./rankingAvailability'", "'./rankingAvailability.js'")
   .replaceAll("'./padel'", "'./padel.js'")
   .replaceAll("'./tournamentAvailability'", "'./tournamentAvailability.js'"));
+const availabilityPath = path.join(tempDir, 'utils/tournamentAvailability.js');
+writeFileSync(availabilityPath, readFileSync(availabilityPath, 'utf8')
+  .replaceAll("'./tournamentVenues'", "'./tournamentVenues.js'"));
 const { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability } =
   await import(pathToFileURL(finderPath).href);
 const { getAvailabilityDateKey, getTournamentAvailabilitySlots, normalizeTournamentSlot } =
@@ -35,7 +38,7 @@ const slot = (id, start = '2030-06-03T18:00:00Z', overrides = {}) => ({
 });
 const tournament = overrides => ({
   id: 't1', groups: [{ id: 'g1', playerIds: ['a', 'b'], matches: [pending('ab', 'a', 'b')] }],
-  timeSlots: [], playoffMatches: [], consolationMatches: [], ...overrides,
+  timeSlots: [slot('s1')], playoffMatches: [], consolationMatches: [], ...overrides,
 });
 const event = (t, overrides = {}) => ({
   id: 'e1', eventType: 'tournament_singolare', players, tournaments: [t],
@@ -192,8 +195,19 @@ test('slot normalization supports legacy aliases, timestamps and rejects invalid
   assert.equal(normalizeTournamentSlot({ id: 'out-of-range', start: 1e20 }), null);
 });
 
-test('only future free slots survive deduplication, including bookings in other groups and finals', () => {
-  const t = tournament({ timeSlots: [slot('s1'), slot('old', '2029-01-01T00:00:00Z')] });
+test('only tournament-local future free slots survive, including bookings in its own groups and finals', () => {
+  const t = tournament({
+    timeSlots: [
+      slot('s1'), slot('s1'), slot('old', '2029-01-01T00:00:00Z'), slot('invalid', 'bad'),
+      slot('at-now', new Date(now).toISOString()), slot('s2', '2030-06-04T18:00:00Z'),
+      slot('s3', '2030-06-05T18:00:00Z'), slot('s4', '2030-06-06T18:00:00Z'),
+    ],
+    groups: [{ matches: [pending('booked', 'e', 'f', { slotId: 's2' })] }],
+    playoffMatches: [pending('final', 'e', 'f', { slotId: 's3' })],
+    consolationMatches: [pending('third', 'e', 'f', {
+      scheduledTime: '2030-06-06T18:00:00Z', location: 'Circolo', field: 'Campo 1',
+    })],
+  });
   const other = tournament({
     id: 'other', groups: [{ matches: [pending('booked', 'e', 'f', { slotId: 's2' })] }],
     playoffMatches: [pending('final', 'e', 'f', { slotId: 's3' })],
@@ -207,6 +221,17 @@ test('only future free slots survive deduplication, including bookings in other 
     ],
   });
   assert.deepEqual(getTournamentAvailabilitySlots(e, t, now).map(item => item.id), ['s1']);
+});
+
+test('other tournaments and legacy event-wide slots do not affect local availability or matching', () => {
+  const t = tournament();
+  const other = tournament({ id: 'other', groups: [{ matches: [pending('busy', 'c', 'd', { slotId: 's1' })] }] });
+  const e = event(t, { tournaments: [t, other], globalTimeSlots: [slot('global-only')] });
+  assert.deepEqual(getTournamentAvailabilitySlots(e, t, now).map(item => item.id), ['s1']);
+  assert.equal(getTournamentMatchSuggestions(e, t, 'a', availability(), now).length, 1);
+  const empty = { ...t, timeSlots: [] };
+  assert.deepEqual(getTournamentAvailabilitySlots(e, empty, now), []);
+  assert.deepEqual(getTournamentMatchSuggestions(e, empty, 'a', availability(), now), []);
 });
 
 test('availability edits and fixture completion immediately change recomputed suggestions without mutating input', () => {

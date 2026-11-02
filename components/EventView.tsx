@@ -6,6 +6,8 @@ import { db } from "../firebase";
 import { updateDoc, doc } from "firebase/firestore";
 import { TrashIcon, PlusIcon } from './Icons';
 import AdminMatchCounts from "./AdminMatchCounts";
+import TournamentVenueSlots from './TournamentVenueSlots';
+import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 
 interface EventViewProps {
   event: Event;
@@ -23,7 +25,7 @@ interface EventViewProps {
 
 const makeId = () => `${Date.now()}${Math.floor(Math.random() * 10000)}`;
 
-type AdminEventSection = 'tournaments' | 'players' | 'rules' | 'groupRules' | 'matchControl';
+type AdminEventSection = 'tournaments' | 'players' | 'rules' | 'groupRules' | 'matchControl' | TournamentVenueId;
 
 const EventView: React.FC<EventViewProps> = ({
   event,
@@ -268,6 +270,15 @@ const EventView: React.FC<EventViewProps> = ({
             >
               Lista giocatori
             </button>
+            {TOURNAMENT_VENUES.map(venue => (
+              <button
+                key={venue.id}
+                className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === venue.id ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
+                onClick={() => setActiveAdminSection(venue.id)}
+              >
+                Slot orari {venue.name}
+              </button>
+            ))}
 
             <button
               className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'rules' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
@@ -427,6 +438,9 @@ const EventView: React.FC<EventViewProps> = ({
           setEvents={setEvents}
           isOrganizer={isOrganizer}
         />
+      )}
+      {isOrganizer && (activeAdminSection === 'canottieri-salo' || activeAdminSection === 'paitone-arena') && (
+        <TournamentVenueSlots key={event.id} event={event} venueId={activeAdminSection} />
       )}
 
       {/* REGOLAMENTO (solo organizzatore) */}

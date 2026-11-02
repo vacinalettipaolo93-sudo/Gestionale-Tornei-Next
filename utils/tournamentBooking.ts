@@ -1,0 +1,85 @@
+import { type Event, type Match, type TimeSlot, type Tournament } from '../types';
+import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from './padel';
+import { getTournamentMatches, getTournamentSlots, isSameCourtTime, isTournamentSlotBooked, normalizeTournamentSlot } from './tournamentAvailability';
+import { TOURNAMENT_VENUES } from './tournamentVenues';
+
+export type TournamentSlotAction =
+  | { type: 'add'; slot: TimeSlot }
+  | { type: 'delete'; slotId: string }
+  | { type: 'book' | 'reschedule'; matchId: string; slotId: string }
+  | { type: 'cancel'; matchId: string };
+
+export interface BookingActor {
+  isOrganizer: boolean;
+  playerId?: string;
+}
+
+const isCompleted = (match: Match) => match.status === 'completed' || (match.score1 != null && match.score2 != null);
+
+export function applyTournamentSlotAction(
+  event: Event, tournamentId: string, action: TournamentSlotAction, actor: BookingActor, now = Date.now(),
+): Tournament[] {
+  const tournament = event.tournaments.find(item => item.id === tournamentId);
+  if (!tournament) throw new Error('Torneo non trovato. Riapri la pagina.');
+  let updated: Tournament;
+  if (action.type === 'add' || action.type === 'delete') {
+    if (!actor.isOrganizer) throw new Error('Solo l’amministratore può gestire gli slot.');
+    if (action.type === 'add') {
+      const slot = normalizeTournamentSlot(action.slot);
+      const venue = TOURNAMENT_VENUES.find(item => item.id === slot?.venueId);
+      if (!slot || !slot.id.trim() || !venue || !slot.field.trim() || Date.parse(slot.start) <= now) {
+        throw new Error('Inserisci una data futura, un orario, un centro e un campo validi.');
+      }
+      if (getTournamentSlots(tournament).some(item => item.id === slot.id || isSameCourtTime(item, slot))) {
+        throw new Error('Questo campo è già presente alla stessa data e ora in questo torneo.');
+      }
+      updated = { ...tournament, timeSlots: [...(tournament.timeSlots ?? []), { ...slot, location: venue.name, field: slot.field.trim() }] };
+    } else {
+      const slot = getTournamentSlots(tournament).find(item => item.id === action.slotId);
+      if (!slot) throw new Error('Slot non trovato.');
+      if (isTournamentSlotBooked(tournament, slot)) throw new Error('Non puoi eliminare uno slot prenotato. Annulla prima la prenotazione della partita.');
+      updated = { ...tournament, timeSlots: (tournament.timeSlots ?? []).filter(item => normalizeTournamentSlot(item)?.id !== action.slotId) };
+    }
+  } else {
+    const match = getTournamentMatches(tournament).find(item => item.id === action.matchId);
+    if (!match) throw new Error('Partita non trovata.');
+    const competitorId = isPadelEvent(event)
+      ? getTeamForPlayer(getTournamentPadelTeams(tournament), actor.playerId)?.id
+      : actor.playerId;
+    if (!actor.isOrganizer && (!competitorId || ![match.player1Id, match.player2Id].includes(competitorId))) {
+      throw new Error('Puoi prenotare solo le partite in cui sei presente.');
+    }
+    if (!match.player1Id || !match.player2Id || isCompleted(match)) {
+      throw new Error('La partita non è prenotabile.');
+    }
+    if (action.type === 'book' && match.status !== 'pending') {
+      throw new Error('La partita è già prenotata. Riapri la scheda per vedere la prenotazione.');
+    }
+    if (action.type !== 'book' && match.status !== 'scheduled') {
+      throw new Error('La prenotazione è stata modificata. Riapri la scheda.');
+    }
+    let updatedMatch: Match;
+    if (action.type === 'cancel') {
+      const { slotId, scheduledTime, location, field, ...rest } = match;
+      updatedMatch = { ...rest, status: 'pending' };
+    } else {
+      const slot = getTournamentSlots(tournament).find(item => item.id === action.slotId);
+      if (!slot || Date.parse(slot.start) <= now) throw new Error('Lo slot non è più disponibile in questo torneo.');
+      if (isTournamentSlotBooked(tournament, slot, match.id)) {
+        throw new Error('Slot appena prenotato da un’altra partita. Seleziona un altro orario o campo.');
+      }
+      updatedMatch = {
+        ...match, status: 'scheduled', slotId: slot.id, scheduledTime: slot.start,
+        location: slot.location, field: slot.field,
+      };
+    }
+    const replace = (matches: Match[]) => matches.map(item => item.id === match.id ? updatedMatch : item);
+    updated = {
+      ...tournament,
+      groups: (tournament.groups ?? []).map(group => ({ ...group, matches: replace(group.matches ?? []) })),
+      ...(tournament.playoffMatches ? { playoffMatches: replace(tournament.playoffMatches) } : {}),
+      ...(tournament.consolationMatches ? { consolationMatches: replace(tournament.consolationMatches) } : {}),
+    };
+  }
+  return event.tournaments.map(item => item.id === tournamentId ? updated : item);
+}
