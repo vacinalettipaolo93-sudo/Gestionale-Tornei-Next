@@ -138,7 +138,7 @@ const MatchCard: React.FC<{
     ? {
         date: new Date(match.scheduledTime).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }),
         time: new Date(match.scheduledTime).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
-        field: match.field || match.location || ""
+        field: [match.location, match.field].filter(Boolean).join(' · ')
       }
     : null;
 

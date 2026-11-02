@@ -102,7 +102,9 @@ export function TournamentMatchFinder({
   tournament: Tournament;
   currentPlayerId: string;
 } & Pick<MatchFinderProps, 'onAvailability' | 'onPlayerContact'>) {
-  const availability = useTournamentAvailability(event.players.map(player => player.id));
+  const availability = useTournamentAvailability(event.players.map(player => player.id), {
+    eventId: event.id, tournamentId: tournament.id,
+  });
   const padel = event.eventType === 'tournament_padel';
   return (
     <MatchFinder

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { type TournamentAvailability } from '../utils/matchFinder';
+import { type TournamentAvailabilityScope } from '../services/availabilityService';
 
 interface AvailabilityState extends TournamentAvailability {
   key: string;
@@ -9,14 +10,14 @@ interface AvailabilityState extends TournamentAvailability {
   error: string | null;
 }
 
-export function useTournamentAvailability(playerIds: string[]) {
-  const key = JSON.stringify([...new Set(playerIds)].sort());
+export function useTournamentAvailability(playerIds: string[], scope: TournamentAvailabilityScope) {
+  const key = JSON.stringify({ ids: [...new Set(playerIds)].sort(), eventId: scope.eventId, tournamentId: scope.tournamentId });
   const [state, setState] = useState<AvailabilityState>({
     key: '', slotPrefMap: {}, dateUnavailMap: {}, loading: true, error: null,
   });
 
   useEffect(() => {
-    const ids: string[] = JSON.parse(key);
+    const { ids, eventId, tournamentId }: { ids: string[] } & TournamentAvailabilityScope = JSON.parse(key);
     const slotPrefMap: TournamentAvailability['slotPrefMap'] = {};
     const dateUnavailMap: TournamentAvailability['dateUnavailMap'] = {};
     const pending = new Set<string>();
@@ -46,6 +47,8 @@ export function useTournamentAvailability(playerIds: string[]) {
             snapshot.docs.forEach(document => {
               const record = document.data();
               if (!chunk.includes(record.playerId)) return;
+              if (collectionName === 'date_unavailabilities'
+                && (record.eventId !== eventId || record.tournamentId !== tournamentId)) return;
               const selected = collectionName === 'slot_preferences' ? record.isPreferred : record.unavailable;
               const value = collectionName === 'slot_preferences' ? record.slotId : record.date;
               if (selected === true && typeof value === 'string') map[record.playerId].add(value);
