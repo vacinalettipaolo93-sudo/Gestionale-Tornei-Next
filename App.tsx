@@ -1087,6 +1087,7 @@ const App: React.FC = () => {
       {isAdminUsersModalOpen && isOrganizer && (
         <AdminUsersModal
           users={users}
+          players={players}
           onClose={() => setIsAdminUsersModalOpen(false)}
         />
       )}
