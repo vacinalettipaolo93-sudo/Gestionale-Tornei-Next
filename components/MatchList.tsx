@@ -129,10 +129,10 @@ const MatchCard: React.FC<{
   }
 
   const isParticipant = !!(loggedInPlayerId && (loggedInPlayerId === player1.id || loggedInPlayerId === player2.id));
-  const canManageBooking = isOrganizer || (isParticipant && viewingOwnGroup);
-  const canEnterResult = isOrganizer || (isParticipant && viewingOwnGroup);
-  const canBook = isOrganizer || (isParticipant && viewingOwnGroup);
-  const canDeleteResult = isOrganizer || (isParticipant && viewingOwnGroup);
+  const canManageBooking = isOrganizer || isParticipant;
+  const canEnterResult = isOrganizer || isParticipant;
+  const canBook = isOrganizer || isParticipant;
+  const canDeleteResult = isOrganizer || isParticipant;
 
   const scheduledInfo = match.status === 'scheduled' && match.scheduledTime
     ? {
@@ -162,13 +162,13 @@ const MatchCard: React.FC<{
 
   return (
     <div className="bg-secondary p-4 rounded-lg shadow">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-        <div className="flex items-center gap-3 justify-start">
-          <img src={player1.avatar} alt={player1.name} className="w-10 h-10 rounded-full object-cover" />
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:gap-4">
+        <div className="min-w-0 flex flex-col sm:flex-row items-center gap-2 justify-start">
+          <img src={player1.avatar} alt="" className="w-10 h-10 shrink-0 rounded-full object-cover" />
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onPlayerContact(player1); }}
-            className="text-left font-semibold hover:underline text-text-primary cursor-pointer"
+            className="min-w-0 text-center sm:text-left text-sm sm:text-base font-semibold hover:underline text-text-primary cursor-pointer"
           >
             {player1.name}
           </button>
@@ -176,39 +176,33 @@ const MatchCard: React.FC<{
 
         <div className="flex flex-col items-center">
           {match.score1 != null && match.score2 != null ? (
-            <div className="text-2xl font-bold text-center">
+            <div className="text-xl sm:text-2xl font-bold text-center whitespace-nowrap rounded-lg bg-primary px-2 py-1">
               {match.score1} — {match.score2}
             </div>
           ) : (
             <div className="text-lg font-medium text-center text-text-secondary">vs</div>
           )}
-          {scheduledInfo && (
-            <div className="text-sm text-text-secondary mt-2 text-center">
-              <span>
-                {scheduledInfo.date} — {scheduledInfo.time}
-              </span>
-              {scheduledInfo.field && (
-                <div className="font-bold text-white">
-                  {scheduledInfo.field}
-                </div>
-              )}
-            </div>
-          )}
         </div>
+        {scheduledInfo && (
+          <div className="text-sm text-text-secondary mt-3 text-center rounded-lg border border-tertiary p-2">
+            <span>{scheduledInfo.date} — {scheduledInfo.time}</span>
+            {scheduledInfo.field && <div className="font-semibold text-text-primary">{scheduledInfo.field}</div>}
+          </div>
+        )}
 
-        <div className="flex items-center gap-3 justify-end">
+        <div className="min-w-0 flex flex-col-reverse sm:flex-row items-center gap-2 justify-end">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onPlayerContact(player2); }}
-            className="font-semibold hover:underline text-text-primary cursor-pointer"
+            className="min-w-0 text-center sm:text-right text-sm sm:text-base font-semibold hover:underline text-text-primary cursor-pointer"
           >
             {player2.name}
           </button>
-          <img src={player2.avatar} alt={player2.name} className="w-10 h-10 rounded-full object-cover" />
+          <img src={player2.avatar} alt="" className="w-10 h-10 shrink-0 rounded-full object-cover" />
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-4 pt-4 mt-4 border-t border-tertiary/50">
+      <div className="flex flex-wrap items-center justify-center gap-2 pt-4 mt-4 border-t border-tertiary/50">
         {match.status === 'pending' && canBook && (
           <button
             onClick={(e) => {
@@ -236,7 +230,7 @@ const MatchCard: React.FC<{
             }}
             className="bg-highlight/80 hover:bg-highlight text-white font-bold py-2 px-3 rounded-lg text-sm transition-colors"
           >
-            Risultato
+            {match.score1 != null ? 'Modifica risultato' : 'Inserisci risultato'}
           </button>
         )}
         {match.status === 'scheduled' && canManageBooking && onRescheduleMatch && (
@@ -251,7 +245,7 @@ const MatchCard: React.FC<{
             }}
             className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-3 rounded-lg text-sm transition-colors"
           >
-            Modifica pren.
+            Modifica prenotazione
           </button>
         )}
         {match.status === 'scheduled' && canManageBooking && onCancelBooking && (
@@ -260,7 +254,7 @@ const MatchCard: React.FC<{
             onClick={(e) => { e.stopPropagation(); onCancelBooking && onCancelBooking(match); }}
             className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded-lg text-sm transition-colors"
           >
-            Annulla pren.
+            Annulla prenotazione
           </button>
         )}
         {match.score1 != null && match.score2 != null && canDeleteResult && onDeleteResult && (
@@ -281,7 +275,7 @@ const MatchCard: React.FC<{
       </div>
 
       {match.status === 'scheduled' && isParticipant && scheduledInfo && (
-        <div className="flex gap-2 mt-4 justify-center">
+        <div className="flex flex-wrap gap-2 mt-4 justify-center">
           <button
             className="bg-highlight text-white text-xs px-3 py-1 rounded hover:bg-accent"
             onClick={() => {
@@ -358,15 +352,10 @@ const MatchList: React.FC<MatchListProps> = ({
 
   const pendingMatches = filteredMatches('pending');
 
-  // scheduled only if slotId + scheduledTime
-  const scheduledMatches = group.matches.filter(m =>
-    m.status === 'scheduled' &&
-    m.slotId &&
-    m.scheduledTime &&
-    (filter === 'all' || (!!loggedInPlayerId && (m.player1Id === loggedInPlayerId || m.player2Id === loggedInPlayerId)))
-  );
+  const scheduledMatches = filteredMatches('scheduled');
 
-  const completedMatches = group.matches.filter(m => m.score1 != null && m.score2 != null);
+  const completedMatches = group.matches.filter(m => m.score1 != null && m.score2 != null
+    && (filter === 'all' || m.player1Id === loggedInPlayerId || m.player2Id === loggedInPlayerId));
 
   const sortByTime = (arr: Match[]) =>
     arr.slice().sort((a, b) => {

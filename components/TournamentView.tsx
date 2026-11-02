@@ -1,13 +1,10 @@
 // components/TournamentView.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect } from 'react';
 import {
   type Event,
   type Tournament,
   type Match,
   type Player,
-  type PlayoffBracket,
-  type PlayoffMatch,
   type Group
 } from '../types';
 import StandingsTable from './StandingsTable';
@@ -22,8 +19,11 @@ import AvailabilityTab from './AvailabilityTab';
 import { TournamentMatchFinder } from './MatchFinder';
 import TournamentBookingModal from './TournamentBookingModal';
 import { saveTournamentSlotAction } from '../services/tournamentBookingService';
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
+import CenteredDialog from './CenteredDialog';
+import MatchScoreFields from './MatchScoreFields';
+import { useSectionScroll } from './useSectionScroll';
+import { saveTournamentResult } from '../services/tournamentResultService';
+import { validateMatchScores } from '../utils/tournamentResults';
 import { getCompetitorName, getTeamForPlayer, getTournamentCompetitors, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
 
 interface TournamentViewProps {
@@ -35,140 +35,6 @@ interface TournamentViewProps {
   initialActiveTab?: 'standings' | 'matches' | 'participants' | 'playoffs' | 'consolation' | 'groups' | 'settings' | 'rules' | 'players' | 'availability';
   initialSelectedGroupId?: string;
   onPlayerContact?: (player: Player | { phone?: string }) => void;
-}
-
-const Portal: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const elRef = useRef<HTMLDivElement | null>(null);
-  if (!elRef.current) elRef.current = document.createElement('div');
-  useEffect(() => {
-    const el = elRef.current!;
-    document.body.appendChild(el);
-    return () => {
-      if (el.parentNode) el.parentNode.removeChild(el);
-    };
-  }, []);
-  return createPortal(children, elRef.current!);
-};
-
-// --- ID helpers ---
-function isPlayoffLeagueMatchId(matchId: string) {
-  return matchId.startsWith('po-');
-}
-function isConsolationLeagueMatchId(matchId: string) {
-  return matchId.startsWith('co-');
-}
-function stripPrefix(matchId: string, prefix: string) {
-  return matchId.startsWith(prefix) ? matchId.slice(prefix.length) : matchId;
-}
-
-// --- Bracket helpers ---
-function computeWinnerIdFromScores(match: { player1Id: string | null; player2Id: string | null }, s1: number, s2: number) {
-  if (!match.player1Id || !match.player2Id) return null;
-  if (s1 === s2) return null;
-  return s1 > s2 ? match.player1Id : match.player2Id;
-}
-
-function buildBracketCopyWithResultAndAdvance(params: {
-  bracket: PlayoffBracket;
-  playoffMatchId: string;
-  score1: number;
-  score2: number;
-  hasBronzeFinal: boolean;
-}) {
-  const { bracket, playoffMatchId, score1, score2, hasBronzeFinal } = params;
-
-  const bracketCopy: PlayoffBracket = JSON.parse(JSON.stringify(bracket));
-  const match = bracketCopy.matches.find((m: PlayoffMatch) => m.id === playoffMatchId);
-  if (!match) return { bracketCopy, updatedMatch: null as PlayoffMatch | null };
-
-  match.score1 = score1;
-  match.score2 = score2;
-
-  const winnerId = computeWinnerIdFromScores({ player1Id: match.player1Id, player2Id: match.player2Id }, score1, score2);
-  if (!winnerId) return { bracketCopy, updatedMatch: match };
-
-  const loserId = winnerId === match.player1Id ? match.player2Id : match.player1Id;
-  match.winnerId = winnerId;
-
-  if (match.nextMatchId) {
-    const nextMatch = bracketCopy.matches.find((m: PlayoffMatch) => m.id === match.nextMatchId);
-    if (nextMatch) {
-      const allMatchesInRound = bracketCopy.matches
-        .filter((m: PlayoffMatch) => m.round === match.round && !m.isBronzeFinal)
-        .sort((a: PlayoffMatch, b: PlayoffMatch) => a.matchIndex - b.matchIndex);
-
-      const matchIndexInRound = allMatchesInRound.findIndex((m: PlayoffMatch) => m.id === match.id);
-
-      if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
-      else nextMatch.player2Id = winnerId;
-    }
-  }
-
-  if (match.loserGoesToBronzeFinal && bracketCopy.bronzeFinalId && hasBronzeFinal) {
-    const bronzeMatch = bracketCopy.matches.find((m: PlayoffMatch) => m.id === bracketCopy.bronzeFinalId);
-    if (bronzeMatch && loserId) {
-      if (bronzeMatch.player1Id === null) bronzeMatch.player1Id = loserId;
-      else if (bronzeMatch.player2Id === null) bronzeMatch.player2Id = loserId;
-    }
-  }
-
-  return { bracketCopy, updatedMatch: match };
-}
-
-function ensureLeagueMatchExistsAndUpToDate(params: {
-  leagueMatches: Match[];
-  leagueMatchId: string;
-  player1Id: string | null;
-  player2Id: string | null;
-  score1: number | null;
-  score2: number | null;
-}) {
-  const { leagueMatches, leagueMatchId, player1Id, player2Id, score1, score2 } = params;
-
-  if (!player1Id || !player2Id) return leagueMatches;
-
-  const idx = leagueMatches.findIndex(m => m.id === leagueMatchId);
-  const nextStatus: Match['status'] = score1 != null && score2 != null ? 'completed' : 'pending';
-
-  const updated: Match = {
-    id: leagueMatchId,
-    player1Id,
-    player2Id,
-    score1,
-    score2,
-    status: nextStatus,
-  };
-
-  if (idx === -1) return [...leagueMatches, updated];
-
-  const prev = leagueMatches[idx];
-  const merged: Match = {
-    ...prev,
-    ...updated,
-    status: nextStatus,
-    scheduledTime: prev.scheduledTime ?? undefined,
-    slotId: prev.slotId ?? undefined,
-    location: prev.location ?? "",
-    field: prev.field ?? "",
-  };
-
-  const copy = leagueMatches.slice();
-  copy[idx] = merged;
-  return copy;
-}
-
-type MatchContainerKind = 'group' | 'playoff' | 'consolation';
-
-function findMatchContainerInTournament(t: Tournament, matchId: string): { kind: MatchContainerKind; groupId?: string } | null {
-  // playoff/consolation first (unique prefixes)
-  if (isPlayoffLeagueMatchId(matchId)) return { kind: 'playoff' };
-  if (isConsolationLeagueMatchId(matchId)) return { kind: 'consolation' };
-
-  // groups
-  for (const g of t.groups) {
-    if (g.matches.some(m => m.id === matchId)) return { kind: 'group', groupId: g.id };
-  }
-  return null;
 }
 
 interface TournamentWithExtraMatches extends Tournament {
@@ -194,11 +60,11 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   const selectedGroup = tournament.groups.find(g => g.id === selectedGroupId);
 
   const [activeTab, setActiveTab] = useState<'standings' | 'matches' | 'participants' | 'playoffs' | 'consolation' | 'groups' | 'settings' | 'rules' | 'players' | 'availability'>(
-    (initialActiveTab ?? 'standings') as any
+    initialActiveTab ?? 'standings'
   );
 
   useEffect(() => {
-    if (initialActiveTab) setActiveTab(initialActiveTab as any);
+    if (initialActiveTab) setActiveTab(initialActiveTab);
   }, [initialActiveTab]);
 
   useEffect(() => {
@@ -219,10 +85,39 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   const [deletingMatch, setDeletingMatch] = useState<Match | null>(null);
 
   const [bookingError, setBookingError] = useState<string>("");
+  const [resultError, setResultError] = useState('');
+  const [savingResult, setSavingResult] = useState(false);
+  const [cancelingMatch, setCancelingMatch] = useState<Match | null>(null);
+  const sectionRef = useSectionScroll(`${tournament.id}:${activeTab}:${selectedGroupId}`);
 
-  // --- TRIGGER RECTS for anchored modals ---
-  const [editingTriggerRect, setEditingTriggerRect] = useState<DOMRect | null>(null);
-  const [deletingTriggerRect, setDeletingTriggerRect] = useState<DOMRect | null>(null);
+  const handleEditResult = (match: Match) => {
+    setScore1(match.score1 == null ? '' : String(match.score1));
+    setScore2(match.score2 == null ? '' : String(match.score2));
+    setResultError('');
+    setEditingMatch(match);
+  };
+  const handleOpenDeleteResult = (match: Match) => {
+    setResultError('');
+    setDeletingMatch(match);
+  };
+  const saveMatchResult = async (match: Match, reset = false) => {
+    if (savingResult) return;
+    const error = reset ? null : validateMatchScores(score1, score2);
+    if (error) { setResultError(error); return; }
+    setSavingResult(true);
+    setResultError('');
+    try {
+      await saveTournamentResult(event.id, tournament.id, match,
+        reset ? { type: 'reset' } : { type: 'save', score1: Number(score1), score2: Number(score2) },
+        { isOrganizer, playerId: loggedInPlayerId });
+      setEditingMatch(null);
+      setDeletingMatch(null);
+    } catch (cause) {
+      setResultError(cause instanceof Error ? cause.message : 'Impossibile salvare il risultato. Riprova.');
+    } finally {
+      setSavingResult(false);
+    }
+  };
 
   const handlePlayerContact = (player: { phone?: string } | Player) => {
     const p = player as Player;
@@ -235,255 +130,6 @@ const TournamentView: React.FC<TournamentViewProps> = ({
       window.open(`https://wa.me/${(p as any).phone.replace(/[^0-9]/g, "")}`, "_blank");
     }
   };
-
-  // risultato (modifica / salva)
-  const handleEditResult = (match: Match, triggerRect?: DOMRect | null) => {
-    setEditingMatch(match);
-    setEditingTriggerRect(triggerRect ?? null);
-    setScore1(match.score1 !== null ? String(match.score1) : "");
-    setScore2(match.score2 !== null ? String(match.score2) : "");
-  };
-
-  async function saveMatchResult(match: Match) {
-    const s1 = Number(score1);
-    const s2 = Number(score2);
-    if (Number.isNaN(s1) || Number.isNaN(s2)) return;
-    const completedAt = match.status === 'completed' ? match.completedAt : new Date().toISOString();
-    const result = { score1: s1, score2: s2, status: 'completed' as const, ...(completedAt ? { completedAt } : {}) };
-
-    // PLAYOFF
-    if (isPlayoffLeagueMatchId(match.id)) {
-      const playoffMatchId = stripPrefix(match.id, 'po-');
-      if (!tournament.playoffs) return;
-
-      const { bracketCopy } = buildBracketCopyWithResultAndAdvance({
-        bracket: tournament.playoffs,
-        playoffMatchId,
-        score1: s1,
-        score2: s2,
-        hasBronzeFinal: !!tournament.settings.hasBronzeFinal,
-      });
-
-      let playoffMatches: Match[] = Array.isArray(t.playoffMatches) ? JSON.parse(JSON.stringify(t.playoffMatches)) : [];
-
-      // keep booking fields, set completed
-      const currentIdx = playoffMatches.findIndex(m => m.id === match.id);
-      if (currentIdx !== -1) {
-        playoffMatches[currentIdx] = { ...playoffMatches[currentIdx], ...result };
-      } else {
-        playoffMatches.push({ ...match, ...result });
-      }
-
-      // ensure next exists if ready
-      const pm = bracketCopy.matches.find(m => m.id === playoffMatchId);
-      if (pm?.nextMatchId) {
-        const nextPm = bracketCopy.matches.find(m => m.id === pm.nextMatchId);
-        if (nextPm && nextPm.player1Id && nextPm.player2Id) {
-          playoffMatches = ensureLeagueMatchExistsAndUpToDate({
-            leagueMatches: playoffMatches,
-            leagueMatchId: `po-${nextPm.id}`,
-            player1Id: nextPm.player1Id,
-            player2Id: nextPm.player2Id,
-            score1: nextPm.score1,
-            score2: nextPm.score2,
-          });
-        }
-      }
-
-      // ensure bronze exists if ready
-      if (bracketCopy.bronzeFinalId && tournament.settings.hasBronzeFinal) {
-        const bronzePm = bracketCopy.matches.find(m => m.id === bracketCopy.bronzeFinalId);
-        if (bronzePm && bronzePm.player1Id && bronzePm.player2Id) {
-          playoffMatches = ensureLeagueMatchExistsAndUpToDate({
-            leagueMatches: playoffMatches,
-            leagueMatchId: `po-${bronzePm.id}`,
-            player1Id: bronzePm.player1Id,
-            player2Id: bronzePm.player2Id,
-            score1: bronzePm.score1,
-            score2: bronzePm.score2,
-          });
-        }
-      }
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, playoffs: bracketCopy, playoffMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setEditingMatch(null);
-      setEditingTriggerRect(null);
-      setScore1("");
-      setScore2("");
-      return;
-    }
-
-    // CONSOLATION
-    if (isConsolationLeagueMatchId(match.id)) {
-      const consolationMatchId = stripPrefix(match.id, 'co-');
-      if (!tournament.consolationBracket) return;
-
-      const { bracketCopy } = buildBracketCopyWithResultAndAdvance({
-        bracket: tournament.consolationBracket,
-        playoffMatchId: consolationMatchId,
-        score1: s1,
-        score2: s2,
-        hasBronzeFinal: false,
-      });
-
-      let consolationMatches: Match[] = Array.isArray(t.consolationMatches) ? JSON.parse(JSON.stringify(t.consolationMatches)) : [];
-
-      const currentIdx = consolationMatches.findIndex(m => m.id === match.id);
-      if (currentIdx !== -1) {
-        consolationMatches[currentIdx] = { ...consolationMatches[currentIdx], ...result };
-      } else {
-        consolationMatches.push({ ...match, ...result });
-      }
-
-      const cm = bracketCopy.matches.find(m => m.id === consolationMatchId);
-      if (cm?.nextMatchId) {
-        const nextCm = bracketCopy.matches.find(m => m.id === cm.nextMatchId);
-        if (nextCm && nextCm.player1Id && nextCm.player2Id) {
-          consolationMatches = ensureLeagueMatchExistsAndUpToDate({
-            leagueMatches: consolationMatches,
-            leagueMatchId: `co-${nextCm.id}`,
-            player1Id: nextCm.player1Id,
-            player2Id: nextCm.player2Id,
-            score1: nextCm.score1,
-            score2: nextCm.score2,
-          });
-        }
-      }
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, consolationBracket: bracketCopy, consolationMatches } : t0
-      );
-
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setEditingMatch(null);
-      setEditingTriggerRect(null);
-      setScore1("");
-      setScore2("");
-      return;
-    }
-
-    // GROUP MATCH (find the correct group by match id)
-    const container = findMatchContainerInTournament(tournament, match.id);
-    if (!container || container.kind !== 'group' || !container.groupId) return;
-
-    const groupId = container.groupId;
-
-    // keep booking fields, set completed
-    const updatedGroups = tournament.groups.map(g => {
-      if (g.id !== groupId) return g;
-      return {
-        ...g,
-        matches: g.matches.map(m => m.id === match.id ? { ...m, ...match, ...result } : m)
-      };
-    });
-
-    const updatedTournaments = event.tournaments.map(t0 =>
-      t0.id === tournament.id ? { ...t0, groups: updatedGroups } : t0
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setEditingMatch(null);
-    setEditingTriggerRect(null);
-    setScore1("");
-    setScore2("");
-  }
-
-  const handleOpenDeleteResult = (match: Match, triggerRect?: DOMRect | null) => {
-    setDeletingMatch(match);
-    setDeletingTriggerRect(triggerRect ?? null);
-  };
-
-  async function deleteMatchResult(match: Match) {
-    const resetMatch = (current: Match): Match => {
-      const { completedAt, ...rest } = current;
-      return { ...rest, score1: null, score2: null, status: 'pending' };
-    };
-    // PLAYOFF
-    if (isPlayoffLeagueMatchId(match.id)) {
-      const playoffMatchId = stripPrefix(match.id, 'po-');
-      if (!tournament.playoffs) return;
-
-      const bracketCopy: PlayoffBracket = JSON.parse(JSON.stringify(tournament.playoffs));
-      const m = bracketCopy.matches.find(x => x.id === playoffMatchId);
-      if (!m) return;
-
-      m.score1 = null;
-      m.score2 = null;
-      m.winnerId = null;
-
-      let playoffMatches: Match[] = Array.isArray(t.playoffMatches) ? JSON.parse(JSON.stringify(t.playoffMatches)) : [];
-      playoffMatches = playoffMatches.map(x => x.id === match.id ? resetMatch(x) : x);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, playoffs: bracketCopy, playoffMatches } : t0
-      );
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setDeletingMatch(null);
-      setDeletingTriggerRect(null);
-      return;
-    }
-
-    // CONSOLATION
-    if (isConsolationLeagueMatchId(match.id)) {
-      const consolationMatchId = stripPrefix(match.id, 'co-');
-      if (!tournament.consolationBracket) return;
-
-      const bracketCopy: PlayoffBracket = JSON.parse(JSON.stringify(tournament.consolationBracket));
-      const m = bracketCopy.matches.find(x => x.id === consolationMatchId);
-      if (!m) return;
-
-      m.score1 = null;
-      m.score2 = null;
-      m.winnerId = null;
-
-      let consolationMatches: Match[] = Array.isArray(t.consolationMatches) ? JSON.parse(JSON.stringify(t.consolationMatches)) : [];
-      consolationMatches = consolationMatches.map(x => x.id === match.id ? resetMatch(x) : x);
-
-      const updatedTournaments = event.tournaments.map(t0 =>
-        t0.id === tournament.id ? { ...t0, consolationBracket: bracketCopy, consolationMatches } : t0
-      );
-      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-      await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-      setDeletingMatch(null);
-      setDeletingTriggerRect(null);
-      return;
-    }
-
-    // GROUP
-    const container = findMatchContainerInTournament(tournament, match.id);
-    if (!container || container.kind !== 'group' || !container.groupId) return;
-
-    const updatedGroups = tournament.groups.map(g => {
-      if (g.id !== container.groupId) return g;
-      return {
-        ...g,
-        matches: g.matches.map(m => m.id === match.id ? resetMatch(m) : m)
-      };
-    });
-
-    const updatedTournaments = event.tournaments.map(t0 =>
-      t0.id === tournament.id ? { ...t0, groups: updatedGroups } : t0
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setDeletingMatch(null);
-    setDeletingTriggerRect(null);
-  }
 
   // booking
   const handleBookMatch = (match: Match) => {
@@ -499,124 +145,20 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
   // cancel booking
   async function handleCancelBooking(match: Match) {
+    if (savingResult) return;
+    setSavingResult(true);
     setBookingError("");
     try {
       await saveTournamentSlotAction(event.id, tournament.id, { type: 'cancel', matchId: match.id }, {
         isOrganizer, playerId: loggedInPlayerId,
       });
+      setCancelingMatch(null);
     } catch (cause) {
       setBookingError(cause instanceof Error ? cause.message : 'Impossibile annullare la prenotazione.');
+    } finally {
+      setSavingResult(false);
     }
   }
-
-  // --- MODAL ANCHORING LOGIC (UNCHANGED FROM YOUR FILE) ---
-  const editingModalRef = useRef<HTMLDivElement | null>(null);
-  const deletingModalRef = useRef<HTMLDivElement | null>(null);
-
-  const [editingModalStyle, setEditingModalStyle] = useState<React.CSSProperties | undefined>(undefined);
-  const [deletingModalStyle, setDeletingModalStyle] = useState<React.CSSProperties | undefined>(undefined);
-
-  function computeAnchorStyle(triggerRect: DOMRect, modalRect: DOMRect) {
-    const margin = 8;
-    const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
-    const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
-
-    if (vw <= 480) {
-      return { position: 'fixed' as const, left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
-    }
-
-    let top = triggerRect.bottom + margin;
-    let left = triggerRect.left;
-
-    if (top + modalRect.height > vh - margin) top = triggerRect.top - modalRect.height - margin;
-
-    top = Math.max(margin, Math.min(top, vh - modalRect.height - margin));
-
-    if (left + modalRect.width > vw - margin) left = Math.max(margin, vw - modalRect.width - margin);
-    left = Math.max(margin, left);
-
-    return { position: 'fixed' as const, top: `${Math.round(top)}px`, left: `${Math.round(left)}px`, transform: 'none' };
-  }
-
-  function anchorModal(modalRef: React.RefObject<HTMLDivElement>, setStyle: (s?: React.CSSProperties) => void, providedTriggerRect?: DOMRect | null) {
-    const modalEl = modalRef.current;
-    if (!modalEl) return;
-
-    requestAnimationFrame(() => {
-      const modalRect = modalEl.getBoundingClientRect();
-
-      const globalLastClickRect = (window as any).__lastClickRect as DOMRect | undefined;
-      const triggerToUse = providedTriggerRect ?? globalLastClickRect ?? null;
-
-      if (triggerToUse) {
-        const styleObj = computeAnchorStyle(triggerToUse, modalRect);
-        try {
-          modalEl.style.position = (styleObj.position as string) || 'fixed';
-          modalEl.style.top = (styleObj.top as string) || '';
-          modalEl.style.left = (styleObj.left as string) || '';
-          modalEl.style.transform = (styleObj.transform as string) || 'none';
-        } catch {
-          modalEl.style.cssText = `position: ${styleObj.position}; top: ${styleObj.top}; left: ${styleObj.left}; transform: ${styleObj.transform};`;
-        }
-        setStyle(styleObj);
-        return;
-      }
-
-      const active = document.activeElement as HTMLElement | null;
-      if (!active || active === document.body || active === document.documentElement) {
-        const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
-        const fallbackStyle = vw <= 480
-          ? { position: 'fixed' as const, left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
-          : { position: 'fixed' as const, top: '20%', left: '50%', transform: 'translateX(-50%)' };
-
-        modalEl.style.position = (fallbackStyle.position as string) || 'fixed';
-        modalEl.style.top = (fallbackStyle as any).top || '';
-        modalEl.style.left = (fallbackStyle as any).left || '';
-        modalEl.style.transform = (fallbackStyle as any).transform || 'none';
-        setStyle(fallbackStyle);
-        return;
-      }
-
-      const triggerRect = active.getBoundingClientRect();
-      const styleObj = computeAnchorStyle(triggerRect, modalRect);
-      modalEl.style.position = (styleObj.position as string) || 'fixed';
-      modalEl.style.top = (styleObj.top as string) || '';
-      modalEl.style.left = (styleObj.left as string) || '';
-      modalEl.style.transform = (styleObj.transform as string) || 'none';
-      setStyle(styleObj);
-    });
-  }
-
-  useEffect(() => {
-    if (editingMatch) {
-      anchorModal(editingModalRef, setEditingModalStyle, editingTriggerRect);
-      const onScroll = () => anchorModal(editingModalRef, setEditingModalStyle, editingTriggerRect);
-      window.addEventListener('scroll', onScroll, true);
-      window.addEventListener('resize', onScroll);
-      return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
-    } else {
-      if (editingModalRef.current) editingModalRef.current.style.cssText = '';
-      setEditingModalStyle(undefined);
-      setEditingTriggerRect(null);
-    }
-  }, [editingMatch, editingTriggerRect]);
-
-  useEffect(() => {
-    if (deletingMatch) {
-      anchorModal(deletingModalRef, setDeletingModalStyle, deletingTriggerRect);
-      const onScroll = () => anchorModal(deletingModalRef, setDeletingModalStyle, deletingTriggerRect);
-      window.addEventListener('scroll', onScroll, true);
-      window.addEventListener('resize', onScroll);
-      return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
-    } else {
-      if (deletingModalRef.current) deletingModalRef.current.style.cssText = '';
-      setDeletingModalStyle(undefined);
-      setDeletingTriggerRect(null);
-    }
-  }, [deletingMatch, deletingTriggerRect]);
-
-  const modalBackdrop = "fixed inset-0 bg-black/70 z-50";
-  const modalBox = "bg-secondary rounded-xl shadow-2xl p-6 w-full max-w-md border border-tertiary";
 
   const playoffVirtualGroup: Group = {
     id: `${tournament.id}-playoffs`,
@@ -632,9 +174,8 @@ const TournamentView: React.FC<TournamentViewProps> = ({
     matches: Array.isArray(t.consolationMatches) ? t.consolationMatches : [],
   };
 
-  // --- UI (same as your latest version: playoff on top) ---
   return (
-    <div>
+    <div ref={sectionRef} className="min-w-0 scroll-mt-4">
       {/* Tabs menu */}
       <div className="flex gap-2 mb-6 flex-wrap">
         <button onClick={() => setActiveTab('standings')}
@@ -729,12 +270,12 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
       {/* Selettore gironi */}
       {selectedGroup && (
-        <div className="mb-6 flex items-center gap-3">
+        <div className="mb-6 flex flex-wrap items-center gap-3">
           <label className="font-bold text-text-secondary">Seleziona Girone:</label>
           <select
             value={selectedGroupId}
             onChange={e => setSelectedGroupId(e.target.value)}
-            className="bg-tertiary rounded px-3 py-2 font-semibold"
+            className="min-w-0 max-w-full bg-tertiary rounded px-3 py-2 font-semibold"
           >
             {tournament.groups.map(g => (
               <option key={g.id} value={g.id}>{g.name}</option>
@@ -780,9 +321,9 @@ const TournamentView: React.FC<TournamentViewProps> = ({
                   onBookMatch={handleBookMatch}
                   isOrganizer={isOrganizer}
                   loggedInPlayerId={loggedInCompetitorId}
-                  onPlayerContact={handlePlayerContact as any}
+                  onPlayerContact={handlePlayerContact}
                   onRescheduleMatch={handleRescheduleMatch}
-                  onCancelBooking={handleCancelBooking}
+                  onCancelBooking={match => { setBookingError(''); setCancelingMatch(match); }}
                   onDeleteResult={handleOpenDeleteResult}
                   viewingOwnGroup={true}
                 />
@@ -799,9 +340,9 @@ const TournamentView: React.FC<TournamentViewProps> = ({
                   onBookMatch={handleBookMatch}
                   isOrganizer={isOrganizer}
                   loggedInPlayerId={loggedInCompetitorId}
-                  onPlayerContact={handlePlayerContact as any}
+                  onPlayerContact={handlePlayerContact}
                   onRescheduleMatch={handleRescheduleMatch}
-                  onCancelBooking={handleCancelBooking}
+                  onCancelBooking={match => { setBookingError(''); setCancelingMatch(match); }}
                   onDeleteResult={handleOpenDeleteResult}
                   viewingOwnGroup={true}
                 />
@@ -818,87 +359,86 @@ const TournamentView: React.FC<TournamentViewProps> = ({
                   onBookMatch={handleBookMatch}
                   isOrganizer={isOrganizer}
                   loggedInPlayerId={loggedInCompetitorId}
-                  onPlayerContact={handlePlayerContact as any}
+                  onPlayerContact={handlePlayerContact}
                   onRescheduleMatch={handleRescheduleMatch}
-                  onCancelBooking={handleCancelBooking}
+                  onCancelBooking={match => { setBookingError(''); setCancelingMatch(match); }}
                   onDeleteResult={handleOpenDeleteResult}
                   viewingOwnGroup={selectedGroup.playerIds.includes(loggedInCompetitorId ?? "")}
                 />
               </div>
             )}
 
-            {/* Modals (same as your file) */}
-            {editingMatch && (
-              <Portal>
-                <div className={modalBackdrop} role="dialog" aria-modal="true">
-                  <div ref={editingModalRef} style={editingModalStyle} className={modalBox}>
-                    <h4 className="mb-4 font-bold text-lg text-accent">Modifica Risultato</h4>
-                    <div className="flex flex-col gap-4">
-                      <div className="flex flex-col">
-                        <label className="font-bold mb-1 text-white">Risultato per {getCompetitorName(event, tournament, editingMatch.player1Id)}</label>
-                        <input type="number" min="0" value={score1} onChange={e => setScore1(e.target.value)} className="border px-3 py-2 rounded font-bold text-white bg-primary"/>
-                      </div>
-                      <div className="flex flex-col">
-                        <label className="font-bold mb-1 text-white">Risultato per {getCompetitorName(event, tournament, editingMatch.player2Id)}</label>
-                        <input type="number" min="0" value={score2} onChange={e => setScore2(e.target.value)} className="border px-3 py-2 rounded font-bold text-white bg-primary"/>
-                      </div>
-                      <div className="flex gap-2 justify-end pt-3">
-                        <button onClick={() => { setEditingMatch(null); setEditingTriggerRect(null); }} className="bg-tertiary px-4 py-2 rounded">Annulla</button>
-                        <button disabled={score1 === "" || score2 === ""} onClick={async () => { if (editingMatch) { await saveMatchResult(editingMatch); } }} className="bg-highlight text-white px-4 py-2 rounded">Salva</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Portal>
-            )}
-
-            {bookingMatch && (
-              <Portal>
-                <TournamentBookingModal
-                  event={event}
-                  tournament={tournament}
-                  match={bookingMatch}
-                  isOrganizer={isOrganizer}
-                  loggedInPlayerId={loggedInPlayerId}
-                  onClose={() => setBookingMatch(null)}
-                />
-              </Portal>
-            )}
-
-            {reschedulingMatch && (
-              <Portal>
-                <TournamentBookingModal
-                  event={event}
-                  tournament={tournament}
-                  match={reschedulingMatch}
-                  isOrganizer={isOrganizer}
-                  loggedInPlayerId={loggedInPlayerId}
-                  reschedule
-                  onClose={() => setReschedulingMatch(null)}
-                />
-              </Portal>
-            )}
-
-            {deletingMatch && (
-              <Portal>
-                <div className={modalBackdrop} role="dialog" aria-modal="true">
-                  <div ref={deletingModalRef} style={deletingModalStyle} className={modalBox}>
-                    <h4 className="mb-4 font-bold text-lg text-red-600">Elimina risultato partita</h4>
-                    <p className="mb-6 font-bold text-white">Sei sicuro di voler eliminare il risultato della partita tra&nbsp;
-                      <strong>{getCompetitorName(event, tournament, deletingMatch.player1Id)}</strong> e&nbsp;
-                      <strong>{getCompetitorName(event, tournament, deletingMatch.player2Id)}</strong>?
-                    </p>
-                    <div className="flex gap-2 justify-end pt-3">
-                      <button onClick={() => { setDeletingMatch(null); setDeletingTriggerRect(null); }} className="bg-tertiary px-4 py-2 rounded">Annulla</button>
-                      <button onClick={async () => { if (deletingMatch) { await deleteMatchResult(deletingMatch); } }} className="bg-red-600 text-white px-4 py-2 rounded">Elimina</button>
-                    </div>
-                  </div>
-                </div>
-              </Portal>
-            )}
           </div>
         )}
 
+        {editingMatch && (
+          <CenteredDialog title={editingMatch.score1 == null ? 'Inserisci risultato' : 'Modifica risultato'} busy={savingResult} onClose={() => setEditingMatch(null)}>
+            <form onSubmit={e => { e.preventDefault(); void saveMatchResult(editingMatch); }} className="space-y-4">
+              <p className="text-sm text-text-secondary">Inserisci il punteggio finale. La prenotazione rimane associata alla partita.</p>
+              <MatchScoreFields
+                names={[getCompetitorName(event, tournament, editingMatch.player1Id), getCompetitorName(event, tournament, editingMatch.player2Id)]}
+                scores={[score1, score2]} onChange={(side, value) => side === 0 ? setScore1(value) : setScore2(value)} disabled={savingResult} />
+              {resultError && <p role="alert" className="text-red-400">{resultError}</p>}
+              <div className="flex flex-wrap gap-2 justify-end pt-3">
+                {editingMatch.score1 != null && <button type="button" disabled={savingResult}
+                  onClick={() => { handleOpenDeleteResult(editingMatch); setEditingMatch(null); }}
+                  className="text-red-300 bg-primary px-4 py-2 rounded-lg">Elimina risultato</button>}
+                <button type="button" disabled={savingResult} onClick={() => setEditingMatch(null)} className="bg-tertiary px-4 py-2 rounded-lg">Annulla</button>
+                <button type="submit" disabled={savingResult || !!validateMatchScores(score1, score2)} className="bg-highlight text-white px-4 py-2 rounded-lg disabled:opacity-50">
+                  {savingResult ? 'Salvataggio...' : 'Salva risultato'}
+                </button>
+              </div>
+            </form>
+          </CenteredDialog>
+        )}
+
+        {bookingMatch && (
+          <TournamentBookingModal
+            event={event}
+            tournament={tournament}
+            match={bookingMatch}
+            isOrganizer={isOrganizer}
+            loggedInPlayerId={loggedInPlayerId}
+            onClose={() => setBookingMatch(null)}
+          />
+        )}
+
+        {reschedulingMatch && (
+          <TournamentBookingModal
+            event={event}
+            tournament={tournament}
+            match={reschedulingMatch}
+            isOrganizer={isOrganizer}
+            loggedInPlayerId={loggedInPlayerId}
+            reschedule
+            onClose={() => setReschedulingMatch(null)}
+          />
+        )}
+
+        {deletingMatch && (
+          <CenteredDialog title="Elimina risultato" busy={savingResult} onClose={() => setDeletingMatch(null)}>
+            <p className="mb-6 font-bold text-white">Sei sicuro di voler eliminare il risultato della partita tra&nbsp;
+              <strong>{getCompetitorName(event, tournament, deletingMatch.player1Id)}</strong> e&nbsp;
+              <strong>{getCompetitorName(event, tournament, deletingMatch.player2Id)}</strong>?
+            </p>
+            <p className="text-sm mb-3">Viene eliminato solo il risultato: l'eventuale prenotazione resta valida.</p>
+            {resultError && <p role="alert" className="text-red-400">{resultError}</p>}
+            <div className="flex flex-wrap gap-2 justify-end pt-3">
+              <button disabled={savingResult} onClick={() => setDeletingMatch(null)} className="bg-tertiary px-4 py-2 rounded">Annulla</button>
+              <button disabled={savingResult} onClick={() => void saveMatchResult(deletingMatch, true)} className="bg-red-600 text-white px-4 py-2 rounded">{savingResult ? 'Salvataggio...' : 'Elimina risultato'}</button>
+            </div>
+          </CenteredDialog>
+        )}
+        {cancelingMatch && (
+          <CenteredDialog title="Annulla prenotazione" busy={savingResult} onClose={() => setCancelingMatch(null)}>
+            <p>Vuoi annullare la prenotazione? Il campo torna disponibile e la partita resta da giocare.</p>
+            {bookingError && <p role="alert" className="text-red-400 mt-3">{bookingError}</p>}
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
+              <button disabled={savingResult} onClick={() => setCancelingMatch(null)} className="bg-tertiary px-4 py-2 rounded">Mantieni prenotazione</button>
+              <button disabled={savingResult} onClick={() => void handleCancelBooking(cancelingMatch)} className="bg-red-600 px-4 py-2 rounded">{savingResult ? 'Salvataggio...' : 'Conferma annullamento'}</button>
+            </div>
+          </CenteredDialog>
+        )}
         {activeTab === 'participants' && !isOrganizer && (
           <ParticipantsTab event={event} tournament={tournament} loggedInPlayerId={loggedInPlayerId} />
         )}
@@ -919,12 +459,12 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
         {activeTab === 'playoffs' && (
           <div className="bg-secondary p-6 rounded-xl shadow-lg max-w-3xl mx-auto">
-            <Playoffs event={event} tournament={tournament} setEvents={setEvents} isOrganizer={isOrganizer} loggedInPlayerId={loggedInCompetitorId} />
+            <Playoffs event={event} tournament={tournament} setEvents={setEvents} isOrganizer={isOrganizer} loggedInPlayerId={loggedInCompetitorId} onEditResult={handleEditResult} />
           </div>
         )}
 
         {activeTab === 'consolation' && (
-          <ConsolationBracket event={event} tournament={tournament} setEvents={setEvents} isOrganizer={isOrganizer} loggedInPlayerId={loggedInCompetitorId} />
+          <ConsolationBracket event={event} tournament={tournament} setEvents={setEvents} isOrganizer={isOrganizer} loggedInPlayerId={loggedInCompetitorId} onEditResult={handleEditResult} />
         )}
 
         {activeTab === 'groups' && isOrganizer && (

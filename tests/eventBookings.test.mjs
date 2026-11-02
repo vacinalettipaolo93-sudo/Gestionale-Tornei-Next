@@ -18,7 +18,7 @@ await build({
   plugins: [{
     name: 'test-dependencies',
     setup(plugin) {
-      plugin.onResolve({ filter: /^react(\/.*)?$/ }, args => ({ path: createRequire(import.meta.url).resolve(args.path), external: true }));
+      plugin.onResolve({ filter: /^react(-dom)?(\/.*)?$/ }, args => ({ path: createRequire(import.meta.url).resolve(args.path), external: true }));
       plugin.onResolve({ filter: /services\/tournamentBookingService$/ }, () => ({ path: 'booking-service', namespace: 'test' }));
       plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
         contents: 'export async function saveTournamentSlotAction() { throw new Error("Unexpected persistence during render"); }',

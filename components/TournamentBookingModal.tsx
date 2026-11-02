@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
+import CenteredDialog from './CenteredDialog';
 import { type Event, type Match, type Tournament } from '../types';
 import { saveTournamentSlotAction } from '../services/tournamentBookingService';
 import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
@@ -19,22 +20,12 @@ const TournamentBookingModal: React.FC<{
   const [slotId, setSlotId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
   const now = useSlotClock(event);
   const slots = getTournamentAvailabilitySlots(event, tournament, now, reschedule ? match.id : undefined);
   const venueSlots = slots.filter(slot => venueId === 'legacy' ? !getSlotVenueId(slot) : getSlotVenueId(slot) === venueId);
   const dates = [...new Set(venueSlots.map(slot => getAvailabilityDateKey(slot.start)))];
   const selectedSlot = venueSlots.find(slot => slot.id === slotId);
   const venueName = TOURNAMENT_VENUES.find(venue => venue.id === venueId)?.name ?? 'Altri slot esistenti';
-
-  useEffect(() => {
-    const previousFocus = document.activeElement;
-    return () => { if (previousFocus instanceof HTMLElement) previousFocus.focus(); };
-  }, []);
-
-  useEffect(() => {
-    modalRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, [venueId]);
 
   const submit = async () => {
     if (!selectedSlot || saving) return;
@@ -52,25 +43,8 @@ const TournamentBookingModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-3 sm:p-6">
-      <div
-        ref={modalRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tournament-booking-title"
-        onKeyDown={e => {
-          if (e.key === 'Escape' && !saving) onClose();
-          if (e.key !== 'Tab') return;
-          const buttons = modalRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
-          if (!buttons?.length) return;
-          const first = buttons[0];
-          const last = buttons[buttons.length - 1];
-          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-          if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-        }}
-        className="bg-secondary rounded-xl shadow-2xl p-4 sm:p-6 w-full max-w-3xl border border-tertiary max-h-[90vh] overflow-y-auto space-y-4"
-      >
-        <h3 id="tournament-booking-title" className="text-xl font-bold text-accent">{reschedule ? 'Modifica prenotazione' : 'Prenota partita'}</h3>
+    <CenteredDialog title={reschedule ? 'Modifica prenotazione' : 'Prenota partita'} wide busy={saving} onClose={onClose}>
+      <div className="space-y-4">
         <p className="text-sm text-text-secondary">
           {tournament.name}: {getCompetitorName(event, tournament, match.player1Id)} — {getCompetitorName(event, tournament, match.player2Id)}
         </p>
@@ -141,7 +115,7 @@ const TournamentBookingModal: React.FC<{
           )}
         </div>
       </div>
-    </div>
+    </CenteredDialog>
   );
 };
 

@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { RankingMatchFinder } from './MatchFinder';
+import CenteredDialog from './CenteredDialog';
+import MatchScoreFields from './MatchScoreFields';
+import { useSectionScroll } from './useSectionScroll';
+import { validateMatchScores } from '../utils/tournamentResults';
+import { assertRankingMatchUnchanged } from '../utils/rankingChanges';
 import {
   type SummerAvailabilityByDay,
   type SummerAvailabilityStatus,
@@ -80,10 +85,13 @@ type ChallengeModalState = {
   location: string;
   /** Only populated when an organiser creates the match (no currentPlayer). */
   player1Id?: string;
+  editingMatch?: Match;
+  slotId?: string;
 };
 
 type MatchResultModalState = {
   matchId: string;
+  original: Match;
   score1: string;
   score2: string;
   outcome: 'player1' | 'player2' | 'draw' | '';
@@ -530,6 +538,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   playersAdminLabel,
 }) => {
   const [activeTab, setActiveTab] = useState<RankingTab>('ranking');
+  const sectionRef = useSectionScroll(activeTab);
   const [slotForm, setSlotForm] = useState({ start: '', location: '', field: '' });
   const [bookingForm, setBookingForm] = useState({ slotId: '', opponentId: '', player1Id: '', player2Id: '' });
   const [resultModal, setResultModal] = useState<MatchResultModalState | null>(null);
@@ -566,6 +575,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   const [editingMasterMatchId, setEditingMasterMatchId] = useState<string | null>(null);
   const [editingMasterPlayersMatchId, setEditingMasterPlayersMatchId] = useState<string | null>(null);
   const [masterScoreForm, setMasterScoreForm] = useState<MasterScoreFormState>({ matchId: null, score1: '', score2: '' });
+  const [isSavingMasterResult, setIsSavingMasterResult] = useState(false);
   const [masterPlayersForm, setMasterPlayersForm] = useState<MasterPlayersFormState>({
     matchId: null,
     player1Id: '',
@@ -845,6 +855,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
     setMatchActionError(null);
     setResultModal({
       matchId: match.id,
+      original: match,
       score1: match.score1 !== null ? String(match.score1) : '',
       score2: match.score2 !== null ? String(match.score2) : '',
       outcome: match.score1 === null || match.score2 === null
@@ -864,7 +875,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const handleSaveResult = async () => {
-    if (!resultModal) return;
+    if (!resultModal || isSavingMatchResult) return;
 
     if (!resultModal.score1.trim() || !resultModal.score2.trim()) {
       setResultModal(previous => previous ? { ...previous, error: 'Il risultato è obbligatorio.' } : previous);
@@ -877,8 +888,9 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
 
     const score1 = Number(resultModal.score1);
     const score2 = Number(resultModal.score2);
-    if (!Number.isFinite(score1) || !Number.isFinite(score2) || score1 < 0 || score2 < 0) {
-      setResultModal(previous => previous ? { ...previous, error: 'Inserisci un punteggio valido (solo numeri >= 0).' } : previous);
+    const scoreError = validateMatchScores(resultModal.score1, resultModal.score2);
+    if (scoreError) {
+      setResultModal(previous => previous ? { ...previous, error: scoreError } : previous);
       return;
     }
 
@@ -905,6 +917,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
     setMatchActionError(null);
     setResultModal(previous => previous ? { ...previous, error: null } : previous);
     try {
+      assertRankingMatchUnchanged(resultModal.original, match);
       await onSaveRankingData({
         ...rankingData,
         matches: rankingData.matches.map(item =>
@@ -922,13 +935,16 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       setResultModal(null);
     } catch (error) {
       console.error('Errore salvataggio risultato partita', error);
-      setResultModal(previous => previous ? { ...previous, error: 'Salvataggio non riuscito. Riprova.' } : previous);
+      setResultModal(previous => previous ? { ...previous, error: error instanceof Error ? error.message : 'Salvataggio non riuscito. Riprova.' } : previous);
     } finally {
       setIsSavingMatchResult(false);
     }
   };
 
   const handleResetResult = async (match: Match) => {
+    if (isSavingMatchResult) return;
+    if (!window.confirm('Eliminare solo il risultato? La prenotazione rimane valida.')) return;
+    setIsSavingMatchResult(true);
     setMatchActionError(null);
     try {
       await onSaveRankingData({
@@ -939,7 +955,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                 ...item,
                 score1: null,
                 score2: null,
-                status: item.slotId ? 'scheduled' : 'pending',
+                status: item.slotId || item.scheduledTime ? 'scheduled' : 'pending',
                 completedAt: undefined,
               }
             : item
@@ -948,6 +964,8 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
     } catch (error) {
       console.error('Errore ripristino risultato partita', error);
       setMatchActionError('Ripristino non riuscito. Riprova.');
+    } finally {
+      setIsSavingMatchResult(false);
     }
   };
 
@@ -964,11 +982,12 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const handleDeleteMatch = async () => {
-    if (!matchToDelete) return;
+    if (!matchToDelete || isDeletingMatch) return;
     setIsDeletingMatch(true);
     setDeleteMatchError(null);
     setMatchActionError(null);
     try {
+      assertRankingMatchUnchanged(matchToDelete, rankingData.matches.find(match => match.id === matchToDelete.id));
       await onSaveRankingData({
         ...rankingData,
         matches: rankingData.matches.filter(match => match.id !== matchToDelete.id),
@@ -976,7 +995,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       setMatchToDelete(null);
     } catch (error) {
       console.error('Errore eliminazione partita', error);
-      setDeleteMatchError('Eliminazione non riuscita. Riprova.');
+      setDeleteMatchError(error instanceof Error ? error.message : 'Eliminazione non riuscita. Riprova.');
     } finally {
       setIsDeletingMatch(false);
     }
@@ -995,17 +1014,19 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const closeChallengeModal = () => {
+    if (isSavingChallenge) return;
     setChallengeModal(null);
     setChallengeError(null);
     setChallengeSuccess(null);
   };
 
   const handleCreateChallenge = async () => {
-    if (!challengeModal) return;
+    if (!challengeModal || isSavingChallenge) return;
     // For organisers without a player account the modal carries player1Id; for
     // regular players we fall back to loggedInPlayerId.
     const isAdminMode = isOrganizer && !currentPlayer;
-    const effectivePlayer1Id = isAdminMode ? (challengeModal.player1Id ?? '') : (loggedInPlayerId ?? '');
+    const existing = challengeModal.editingMatch;
+    const effectivePlayer1Id = existing?.player1Id ?? (isAdminMode ? (challengeModal.player1Id ?? '') : (loggedInPlayerId ?? ''));
     if (!isAdminMode && (!loggedInPlayerId || !currentPlayer)) return;
     if (isAdminMode && !effectivePlayer1Id) return;
     const { opponentId, scheduledDate, scheduledHour, location } = challengeModal;
@@ -1033,19 +1054,24 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       setChallengeError('Data o orario non validi.');
       return;
     }
+    if (chosenDate.getTime() <= Date.now()) {
+      setChallengeError('Seleziona una data e un orario futuri.');
+      return;
+    }
 
     if (opponentId === effectivePlayer1Id) {
       setChallengeError('Non puoi prenotare una partita contro te stesso.');
       return;
     }
 
-    if (getHeadToHeadCount(rankingData.matches, effectivePlayer1Id, opponentId) >= effectiveConfig.headToHeadLimit) {
+    if (!existing && getHeadToHeadCount(rankingData.matches, effectivePlayer1Id, opponentId) >= effectiveConfig.headToHeadLimit) {
       setChallengeError(`Il limite massimo di ${effectiveConfig.headToHeadLimit} scontri tra questi giocatori è già stato raggiunto.`);
       return;
     }
 
     const nextMatch: Match = {
-      id: generateId('srn-booking'),
+      ...existing,
+      id: existing?.id ?? generateId('srn-booking'),
       player1Id: effectivePlayer1Id,
       player2Id: opponentId,
       score1: null,
@@ -1053,19 +1079,18 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       status: 'scheduled',
       scheduledTime: chosenDate.toISOString(),
       location: location,
+      ...(challengeModal.slotId ? { slotId: challengeModal.slotId, field: rankingData.slots.find(slot => slot.id === challengeModal.slotId)?.field ?? '' } : {}),
     };
 
     setIsSavingChallenge(true);
     setChallengeError(null);
     try {
+      if (existing) assertRankingMatchUnchanged(existing, rankingData.matches.find(match => match.id === existing.id));
       await onSaveRankingData({
         ...rankingData,
-        matches: [...rankingData.matches, nextMatch],
+        matches: existing ? rankingData.matches.map(match => match.id === existing.id ? nextMatch : match) : [...rankingData.matches, nextMatch],
       });
-      setChallengeSuccess('Partita prenotata con successo! La partita è ora visibile nel tab Partite.');
-      setTimeout(() => {
-        closeChallengeModal();
-      }, 1500);
+      setChallengeModal(null);
     } catch (err) {
       console.error('Errore prenotazione partita', err);
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1073,6 +1098,19 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
     } finally {
       setIsSavingChallenge(false);
     }
+  };
+
+  const openRescheduleMatch = (match: Match) => {
+    const date = match.scheduledTime ? new Date(match.scheduledTime) : new Date();
+    const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    setChallengeModal({
+      editingMatch: match, player1Id: match.player1Id, opponentId: match.player2Id,
+      opponentName: playerMap.get(match.player2Id)?.name ?? '', scheduledDate: localDate,
+      scheduledHour: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`,
+      location: match.location ?? 'Tennis Salò Canottieri', slotId: match.slotId,
+    });
+    setChallengeError(null);
+    setChallengeSuccess(null);
   };
 
   const persistMasterQualifiedPlayers = async (qualifiedPlayerIds: string[]) => {
@@ -1246,17 +1284,13 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const handleSaveMasterResult = async (match: SummerRankingMasterMatch) => {
-    if (!rankingData.master?.matches || !canManageMasterMatch(match)) return;
+    if (!rankingData.master?.matches || !canManageMasterMatch(match) || isSavingMasterResult) return;
 
     const score1 = Number(masterScoreForm.score1);
     const score2 = Number(masterScoreForm.score2);
-    if (
-      Number.isNaN(score1) ||
-      Number.isNaN(score2) ||
-      score1 < 0 ||
-      score2 < 0 ||
-      score1 === score2
-    ) {
+    const scoreError = validateMatchScores(masterScoreForm.score1, masterScoreForm.score2);
+    if (scoreError || score1 === score2) {
+      setMatchActionError(scoreError ?? 'Nel Master è necessario un vincitore.');
       return;
     }
 
@@ -1292,17 +1326,21 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
           matches: nextMatches,
         };
 
-    await onSaveRankingData({
-      ...rankingData,
-      master: nextMaster,
-    });
-
-    setEditingMasterMatchId(null);
-    setMasterScoreForm({ matchId: null, score1: '', score2: '' });
+    setIsSavingMasterResult(true);
+    setMatchActionError(null);
+    try {
+      await onSaveRankingData({ ...rankingData, master: nextMaster });
+      setEditingMasterMatchId(null);
+      setMasterScoreForm({ matchId: null, score1: '', score2: '' });
+    } catch (cause) {
+      setMatchActionError(cause instanceof Error ? cause.message : 'Risultato Master non salvato. Riprova.');
+    } finally {
+      setIsSavingMasterResult(false);
+    }
   };
 
   const handleResetMasterResult = async (match: SummerRankingMasterMatch) => {
-    if (!rankingData.master?.matches || !canManageMasterMatch(match)) return;
+    if (!rankingData.master?.matches || !canManageMasterMatch(match) || isSavingMasterResult) return;
 
     const nextMatches = rankingData.master.matches.map(item =>
       item.id === match.id
@@ -1310,7 +1348,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
             ...item,
             score1: null,
             score2: null,
-            status: item.slotId ? 'scheduled' : 'pending',
+            status: item.slotId || item.scheduledTime ? 'scheduled' : 'pending',
             completedAt: undefined,
           }
         : item
@@ -1337,14 +1375,18 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
           matches: nextMatches,
         };
 
-    await onSaveRankingData({
-      ...rankingData,
-      master: nextMaster,
-    });
-
-    if (editingMasterMatchId === match.id) {
-      setEditingMasterMatchId(null);
-      setMasterScoreForm({ matchId: null, score1: '', score2: '' });
+    setIsSavingMasterResult(true);
+    setMatchActionError(null);
+    try {
+      await onSaveRankingData({ ...rankingData, master: nextMaster });
+      if (editingMasterMatchId === match.id) {
+        setEditingMasterMatchId(null);
+        setMasterScoreForm({ matchId: null, score1: '', score2: '' });
+      }
+    } catch (cause) {
+      setMatchActionError(cause instanceof Error ? cause.message : 'Risultato Master non eliminato. Riprova.');
+    } finally {
+      setIsSavingMasterResult(false);
     }
   };
 
@@ -1676,7 +1718,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div ref={sectionRef} className="min-w-0 space-y-4 sm:space-y-6 scroll-mt-4">
       <div className="bg-secondary rounded-xl shadow-lg p-4 sm:p-6">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
@@ -2558,10 +2600,16 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                     )}
                     {canEditMatchResult(match) && match.status === 'completed' && (
                       <button
+                        disabled={isSavingMatchResult}
                         onClick={() => handleResetResult(match)}
                         className="px-3 py-1 rounded bg-primary border border-tertiary text-xs font-semibold"
                       >
-                        Ripristina
+                        Elimina risultato
+                      </button>
+                    )}
+                    {canEditMatchResult(match) && match.status === 'scheduled' && (
+                      <button onClick={() => openRescheduleMatch(match)} className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold">
+                        Modifica prenotazione
                       </button>
                     )}
                     {canEditMatchResult(match) && (
@@ -2569,7 +2617,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                         onClick={() => openDeleteMatchModal(match)}
                         className="px-3 py-1 rounded bg-red-600 text-white text-xs font-semibold"
                       >
-                        Elimina
+                        {match.status === 'scheduled' ? 'Annulla prenotazione' : 'Elimina partita'}
                       </button>
                     )}
                     {match.status === 'scheduled' && (() => {
@@ -2769,6 +2817,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
         </>
       )}
 
+      {activeTab === 'master' && matchActionError && <p role="alert" className="text-red-400">{matchActionError}</p>}
       {activeTab === 'master' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -3151,7 +3200,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                                 onChange={event => setMasterScoreForm(previous => ({ ...previous, score2: event.target.value }))}
                                 className="w-16 bg-primary border border-tertiary rounded px-2 py-1 text-sm"
                               />
-                              <button onClick={() => handleSaveMasterResult(match)} className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold">Salva</button>
+                              <button disabled={isSavingMasterResult} onClick={() => handleSaveMasterResult(match)} className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold">{isSavingMasterResult ? 'Salvataggio...' : 'Salva'}</button>
                             </div>
                           ) : (
                             <div className="text-sm font-semibold">
@@ -3321,6 +3370,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                                   />
                                   <button
                                     onClick={() => handleSaveMasterResult(match)}
+                                    disabled={isSavingMasterResult}
                                     className="px-3 py-1 rounded bg-highlight text-white text-xs font-semibold"
                                   >
                                     Salva
@@ -4057,15 +4107,8 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       )}
 
       {resultModal && resultModalMatch && (
-        <Portal>
-          <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) closeResultModal(); }}
-          >
-            <div className="bg-secondary rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
-              <h3 className="text-xl font-bold text-accent">
-                {resultModalMatch.status === 'completed' ? 'Modifica risultato' : 'Inserisci risultato'}
-              </h3>
+        <CenteredDialog title={resultModalMatch.status === 'completed' ? 'Modifica risultato' : 'Inserisci risultato'} busy={isSavingMatchResult} onClose={closeResultModal}>
+            <fieldset disabled={isSavingMatchResult} className="space-y-4">
               <p className="text-sm text-text-secondary">
                 <span className="font-semibold text-text-primary">{playerMap.get(resultModalMatch.player1Id)?.name ?? resultModalMatch.player1Id}</span>
                 {' '}vs{' '}
@@ -4096,44 +4139,21 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-text-secondary">
-                    {playerMap.get(resultModalMatch.player1Id)?.name ?? 'Giocatore 1'} <span className="text-red-400">*</span>
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={resultModal.score1}
-                    onChange={event => setResultModal(previous => previous ? { ...previous, score1: event.target.value, error: null } : previous)}
-                    className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-text-secondary">
-                    {playerMap.get(resultModalMatch.player2Id)?.name ?? 'Giocatore 2'} <span className="text-red-400">*</span>
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={resultModal.score2}
-                    onChange={event => setResultModal(previous => previous ? { ...previous, score2: event.target.value, error: null } : previous)}
-                    className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
-                  />
-                </label>
-              </div>
+              <MatchScoreFields names={[playerMap.get(resultModalMatch.player1Id)?.name ?? 'Giocatore 1', playerMap.get(resultModalMatch.player2Id)?.name ?? 'Giocatore 2']}
+                scores={[resultModal.score1, resultModal.score2]} disabled={isSavingMatchResult}
+                onChange={(side, value) => setResultModal(previous => previous ? { ...previous, [side === 0 ? 'score1' : 'score2']: value, error: null } : previous)} />
 
               <div className="text-xs text-text-secondary">
                 Risultato: {(resultModal.score1 || '0')} - {(resultModal.score2 || '0')}
               </div>
 
               {resultModal.error && (
-                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                   {resultModal.error}
                 </div>
               )}
 
-              <div className="flex gap-3 justify-end pt-2">
+              <div className="flex flex-wrap gap-3 justify-end pt-2">
                 <button
                   onClick={closeResultModal}
                   disabled={isSavingMatchResult}
@@ -4149,21 +4169,15 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   {isSavingMatchResult ? 'Salvataggio...' : 'Salva risultato'}
                 </button>
               </div>
-            </div>
-          </div>
-        </Portal>
+            </fieldset>
+        </CenteredDialog>
       )}
 
       {matchToDelete && (
-        <Portal>
-          <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) closeDeleteMatchModal(); }}
-          >
-            <div className="bg-secondary rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-              <h3 className="text-xl font-bold text-red-400">Conferma eliminazione</h3>
+        <CenteredDialog title={matchToDelete.status === 'scheduled' ? 'Annulla prenotazione' : 'Elimina partita'} busy={isDeletingMatch} onClose={closeDeleteMatchModal}>
+            <div className="space-y-4">
               <p className="text-sm text-text-secondary">
-                Vuoi eliminare definitivamente questa partita? L&apos;operazione rimuoverà anche i punti assegnati a questa partita.
+                {matchToDelete.status === 'scheduled' ? 'Vuoi annullare la prenotazione e rimuovere questa partita dal calendario?' : 'Vuoi eliminare definitivamente questa partita? Verranno rimossi anche i punti assegnati.'}
               </p>
               <p className="text-sm">
                 <span className="font-semibold text-text-primary">{playerMap.get(matchToDelete.player1Id)?.name ?? matchToDelete.player1Id}</span>
@@ -4177,7 +4191,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                 </div>
               )}
 
-              <div className="flex gap-3 justify-end pt-2">
+              <div className="flex flex-wrap gap-3 justify-end pt-2">
                 <button
                   onClick={closeDeleteMatchModal}
                   disabled={isDeletingMatch}
@@ -4194,20 +4208,14 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                 </button>
               </div>
             </div>
-          </div>
-        </Portal>
+        </CenteredDialog>
       )}
 
       {challengeModal && (
-        <Portal>
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) closeChallengeModal(); }}
-          >
-            <div className="bg-secondary rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-              <h3 className="text-xl font-bold text-accent">Crea partita</h3>
+        <CenteredDialog title={challengeModal.editingMatch ? 'Modifica prenotazione' : 'Prenota partita'} busy={isSavingChallenge} onClose={closeChallengeModal}>
+            <fieldset disabled={isSavingChallenge} className="space-y-4">
               <p className="text-sm text-text-secondary">
-                Seleziona avversario, data, orario e luogo per completare la prenotazione della partita.
+                {challengeModal.editingMatch ? 'Modifica giorno, orario e centro mantenendo gli stessi giocatori.' : 'Seleziona avversario, data, orario e luogo per completare la prenotazione.'}
               </p>
 
               <div className="space-y-3">
@@ -4217,6 +4225,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                     <span className="text-xs font-semibold text-text-secondary">Giocatore 1 <span className="text-red-400">*</span></span>
                     <select
                       value={challengeModal.player1Id ?? ''}
+                      disabled={!!challengeModal.editingMatch}
                       onChange={e => setChallengeModal(prev => prev ? { ...prev, player1Id: e.target.value } : prev)}
                       className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
                     >
@@ -4235,6 +4244,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   <span className="text-xs font-semibold text-text-secondary">{(isOrganizer && !currentPlayer) ? 'Giocatore 2' : 'Avversario'} <span className="text-red-400">*</span></span>
                   <select
                     value={challengeModal.opponentId}
+                    disabled={!!challengeModal.editingMatch}
                     onChange={e => setChallengeModal(prev => prev ? {
                       ...prev,
                       opponentId: e.target.value,
@@ -4243,7 +4253,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                     className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
                   >
                     <option value="">{(isOrganizer && !currentPlayer) ? 'Seleziona giocatore 2' : 'Seleziona avversario'}</option>
-                    {(isOrganizer && !currentPlayer ? confirmedPlayers.filter(p => p.id !== (challengeModal.player1Id ?? '')) : eligibleOpponents).map(player => (
+                    {(challengeModal.editingMatch ? confirmedPlayers.filter(player => player.id === challengeModal.opponentId) : isOrganizer && !currentPlayer ? confirmedPlayers.filter(p => p.id !== (challengeModal.player1Id ?? '')) : eligibleOpponents).map(player => (
                       <option key={player.id} value={player.id}>
                         {player.name}
                       </option>
@@ -4251,10 +4261,30 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   </select>
                 </label>
 
+                {challengeModal.editingMatch?.slotId && (
+                  <label className="flex flex-col gap-1">
+                    <span className="text-sm font-semibold">Slot disponibile</span>
+                    <select aria-label="Slot disponibile" value={challengeModal.slotId ?? ''} onChange={event => {
+                      const slot = rankingData.slots.find(item => item.id === event.target.value);
+                      if (!slot) return;
+                      const date = new Date(slot.start);
+                      setChallengeModal(previous => previous ? {
+                        ...previous, slotId: slot.id, location: slot.location,
+                        scheduledDate: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+                        scheduledHour: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`,
+                      } : previous);
+                    }} className="w-full bg-primary border border-tertiary rounded-lg p-2">
+                      {rankingData.slots.filter(slot => slot.id === challengeModal.editingMatch?.slotId || availableSlots.some(item => item.id === slot.id)).map(slot => (
+                        <option key={slot.id} value={slot.id}>{new Date(slot.start).toLocaleString('it-IT')} - {slot.location} - {slot.field}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-text-secondary">Data <span className="text-red-400">*</span></span>
                   <input
                     type="date"
+                    disabled={!!challengeModal.editingMatch?.slotId}
                     value={challengeModal.scheduledDate}
                     onChange={e => setChallengeModal(prev => prev ? { ...prev, scheduledDate: e.target.value } : prev)}
                     className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
@@ -4265,6 +4295,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   <span className="text-xs font-semibold text-text-secondary">Orario <span className="text-red-400">*</span></span>
                   <input
                     type="time"
+                    disabled={!!challengeModal.editingMatch?.slotId}
                     value={challengeModal.scheduledHour}
                     onChange={e => setChallengeModal(prev => prev ? { ...prev, scheduledHour: e.target.value } : prev)}
                     className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
@@ -4275,11 +4306,14 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   <span className="text-xs font-semibold text-text-secondary">Luogo <span className="text-red-400">*</span></span>
                   <select
                     value={challengeModal.location}
+                    disabled={!!challengeModal.editingMatch?.slotId}
                     onChange={e => setChallengeModal(prev => prev ? { ...prev, location: e.target.value } : prev)}
                     className="bg-primary border border-tertiary rounded-lg px-3 py-2 text-text-primary"
                   >
                     <option value="Tennis Salò Canottieri">Tennis Salò Canottieri</option>
                     <option value="Paitone Arena">Paitone Arena</option>
+                    {challengeModal.location && !['Tennis Salò Canottieri', 'Paitone Arena'].includes(challengeModal.location)
+                      && <option value={challengeModal.location}>{challengeModal.location}</option>}
                   </select>
                 </label>
               </div>
@@ -4295,7 +4329,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                 </div>
               )}
 
-              <div className="flex gap-3 justify-end pt-2">
+              <div className="flex flex-wrap gap-3 justify-end pt-2">
                 <button
                   onClick={closeChallengeModal}
                   disabled={isSavingChallenge}
@@ -4308,12 +4342,11 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
                   disabled={isSavingChallenge || !challengeModal.opponentId || !challengeModal.scheduledDate || !challengeModal.scheduledHour || !challengeModal.location || (isOrganizer && !currentPlayer && !challengeModal.player1Id)}
                   className="px-4 py-2 rounded bg-accent hover:bg-accent/80 text-white font-semibold text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {isSavingChallenge ? 'Salvataggio...' : 'Conferma prenotazione'}
+                  {isSavingChallenge ? 'Salvataggio...' : challengeModal.editingMatch ? 'Salva modifica' : 'Conferma prenotazione'}
                 </button>
               </div>
-            </div>
-          </div>
-        </Portal>
+            </fieldset>
+        </CenteredDialog>
       )}
 
       {pendingStartPointsConfirm && (

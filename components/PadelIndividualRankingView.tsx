@@ -1,4 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSectionScroll } from './useSectionScroll';
+import MatchScoreFields from './MatchScoreFields';
+import CenteredDialog from './CenteredDialog';
+import { validateMatchScores } from '../utils/tournamentResults';
+import { assertRankingMatchUnchanged } from '../utils/rankingChanges';
 import { RankingMatchFinder } from './MatchFinder';
 import {
   type Match,
@@ -167,6 +172,10 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   playersAdminLabel,
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('ranking');
+  const sectionRef = useSectionScroll(activeTab);
+  const [isMatchFormOpen, setIsMatchFormOpen] = useState(false);
+  const pointsRef = useRef<HTMLDivElement>(null);
+  const editingSnapshot = useRef<Match | null>(null);
   const [matchForm, setMatchForm] = useState<MatchFormState>(() => createInitialMatchForm());
   const [isSavingMatch, setIsSavingMatch] = useState(false);
   const [matchFeedback, setMatchFeedback] = useState<string | null>(null);
@@ -316,11 +325,14 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   }, [loggedInPlayerId, rankingData.availabilities]);
 
   const resetMatchForm = () => {
-    setMatchForm(createInitialMatchForm());
+    setMatchForm({ ...createInitialMatchForm(), team1Player1Id: !isOrganizer ? loggedInPlayerId ?? '' : '' });
+    editingSnapshot.current = null;
     setMatchFeedback(null);
   };
 
   const handleEditMatch = (match: Match) => {
+    if (!canManageMatch(match, isOrganizer, loggedInPlayerId)) return;
+    editingSnapshot.current = match;
     const team1PlayerIds = getPadelIndividualTeamPlayerIds(match, 1);
     const team2PlayerIds = getPadelIndividualTeamPlayerIds(match, 2);
     setMatchFeedback(null);
@@ -336,6 +348,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
       error: null,
     });
     setActiveTab('matches');
+    setIsMatchFormOpen(true);
   };
 
   const validateMatchForm = () => {
@@ -346,7 +359,8 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
     if (!isOrganizer && (!loggedInPlayerId || !ids.includes(loggedInPlayerId))) {
       return 'Puoi registrare solo partite in cui sei presente.';
     }
-    if (!matchForm.score1.trim() || !matchForm.score2.trim()) return 'Inserisci i game di entrambe le coppie.';
+    const scoreError = validateMatchScores(matchForm.score1, matchForm.score2);
+    if (scoreError) return scoreError;
     const score1 = Number(matchForm.score1);
     const score2 = Number(matchForm.score2);
     if (!Number.isFinite(score1) || !Number.isFinite(score2) || score1 < 0 || score2 < 0) {
@@ -360,13 +374,23 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   };
 
   const handleSaveMatch = async () => {
+    if (isSavingMatch) return;
     const validationError = validateMatchForm();
     if (validationError) {
       setMatchForm(previous => ({ ...previous, error: validationError }));
       return;
     }
 
+    const existing = rankingData.matches.find(match => match.id === matchForm.editingMatchId);
+    if (matchForm.editingMatchId) {
+      try { assertRankingMatchUnchanged(editingSnapshot.current, existing); }
+      catch (cause) {
+        setMatchForm(previous => ({ ...previous, error: cause instanceof Error ? cause.message : 'Riapri la modifica.' }));
+        return;
+      }
+    }
     const nextMatch: Match = {
+      ...existing,
       id: matchForm.editingMatchId ?? generateId('padel-ranking-match'),
       player1Id: matchForm.team1Player1Id,
       player2Id: matchForm.team2Player1Id,
@@ -389,30 +413,34 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
           ? rankingData.matches.map(match => match.id === matchForm.editingMatchId ? nextMatch : match)
           : [nextMatch, ...rankingData.matches],
       });
-      setMatchFeedback(matchForm.editingMatchId ? 'Risultato aggiornato correttamente.' : 'Partita registrata correttamente.');
       resetMatchForm();
+      setIsMatchFormOpen(false);
+      setMatchFeedback(matchForm.editingMatchId ? 'Risultato aggiornato correttamente.' : 'Partita registrata correttamente.');
     } catch (error) {
       console.error('Errore salvataggio partita ranking padel individuale', error);
-      setMatchForm(previous => ({ ...previous, error: 'Salvataggio non riuscito. Riprova.' }));
+      setMatchForm(previous => ({ ...previous, error: error instanceof Error ? error.message : 'Salvataggio non riuscito. Riprova.' }));
     } finally {
       setIsSavingMatch(false);
     }
   };
 
   const handleDeleteMatch = async (match: Match) => {
-    if (!isOrganizer) return;
+    if (!canManageMatch(match, isOrganizer, loggedInPlayerId) || isSavingMatch) return;
     if (!window.confirm('Eliminare questa partita dal ranking?')) return;
+    setIsSavingMatch(true);
     try {
       await onSaveRankingData({
         ...rankingData,
         matches: rankingData.matches.filter(item => item.id !== match.id),
       });
-      setMatchFeedback('Partita eliminata correttamente.');
       if (selectedMatchId === match.id) setSelectedMatchId(null);
       if (matchForm.editingMatchId === match.id) resetMatchForm();
+      setMatchFeedback('Partita eliminata correttamente.');
     } catch (error) {
       console.error('Errore eliminazione partita ranking padel individuale', error);
-      setMatchFeedback('Eliminazione non riuscita. Riprova.');
+      setMatchFeedback(error instanceof Error ? error.message : 'Eliminazione non riuscita. Riprova.');
+    } finally {
+      setIsSavingMatch(false);
     }
   };
 
@@ -491,11 +519,12 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   };
 
   const handleSaveMasterResult = async (match: SummerRankingMasterMatch) => {
-    if (!rankingData.padelIndividualMaster?.matches || !rankingData.padelIndividualMaster.bracket) return;
+    if (!rankingData.padelIndividualMaster?.matches || !rankingData.padelIndividualMaster.bracket || isSavingMaster) return;
     const score1 = Number(masterResultForm.score1);
     const score2 = Number(masterResultForm.score2);
-    if (!Number.isFinite(score1) || !Number.isFinite(score2) || score1 < 0 || score2 < 0 || score1 === score2) {
-      setMasterResultForm(previous => ({ ...previous, error: 'Inserisci un risultato valido senza pareggio.' }));
+    const scoreError = validateMatchScores(masterResultForm.score1, masterResultForm.score2);
+    if (scoreError || score1 === score2) {
+      setMasterResultForm(previous => ({ ...previous, error: scoreError ?? 'Nel Master è necessario un vincitore.' }));
       return;
     }
 
@@ -549,7 +578,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
             ...item,
             score1: null,
             score2: null,
-            status: 'pending' as const,
+            status: item.slotId || item.scheduledTime ? 'scheduled' as const : 'pending' as const,
             completedAt: undefined,
           }
           : item,
@@ -703,7 +732,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   const pairOptions = autoQualifiedIds.map(playerId => playerMap.get(playerId)).filter(Boolean) as Player[];
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div ref={sectionRef} className="min-w-0 space-y-4 sm:space-y-6 scroll-mt-4">
       <div className="bg-secondary rounded-xl shadow-lg p-4 sm:p-6">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
@@ -825,7 +854,14 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
               description="Giocatori con almeno un giorno e una fascia oraria in comune con te. Nel ranking Padel a partner liberi la compatibilità è con il singolo avversario: concordate anche la presenza degli altri due giocatori."
             />
           )}
-          <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
+          <div className="bg-secondary rounded-xl shadow-lg p-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-text-secondary">Registra la partita o gestisci i tuoi risultati dallo storico.</p>
+            <button disabled={(!isOrganizer && !currentPlayer) || isSavingMatch} onClick={() => { resetMatchForm(); setIsMatchFormOpen(true); }}
+              className="bg-highlight text-white px-4 py-2 rounded-lg font-bold disabled:opacity-50">Inserisci risultato</button>
+          </div>
+          {matchFeedback && <p role="status" className="rounded-lg border border-tertiary p-3">{matchFeedback}</p>}
+          {isMatchFormOpen && <CenteredDialog title={matchForm.editingMatchId ? 'Modifica risultato' : 'Registra partita'} wide busy={isSavingMatch} onClose={() => setIsMatchFormOpen(false)}>
+          <fieldset disabled={isSavingMatch} className="space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h3 className="text-lg font-bold text-accent">Registra partita</h3>
@@ -863,19 +899,12 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-text-secondary mb-1">Game coppia 1</label>
-                    <input type="number" min="0" value={matchForm.score1} onChange={event => setMatchForm(previous => ({ ...previous, score1: event.target.value, error: null }))} className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-secondary mb-1">Game coppia 2</label>
-                    <input type="number" min="0" value={matchForm.score2} onChange={event => setMatchForm(previous => ({ ...previous, score2: event.target.value, error: null }))} className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary" />
-                  </div>
+                <MatchScoreFields names={[getPairNameByIds(previewTeam1, playerMap) || 'Coppia 1', getPairNameByIds(previewTeam2, playerMap) || 'Coppia 2']}
+                  scores={[matchForm.score1, matchForm.score2]} disabled={isSavingMatch}
+                  onChange={(side, value) => setMatchForm(previous => ({ ...previous, [side === 0 ? 'score1' : 'score2']: value, error: null }))} />
                   <div>
                     <label className="block text-xs font-semibold text-text-secondary mb-1">Data partita</label>
                     <input type="datetime-local" value={matchForm.completedAt} onChange={event => setMatchForm(previous => ({ ...previous, completedAt: event.target.value, error: null }))} className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary" />
-                  </div>
                 </div>
 
                 {matchForm.error && <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{matchForm.error}</div>}
@@ -888,7 +917,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                     className="inline-flex items-center gap-2 px-4 py-2 rounded bg-accent text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <PlusIcon className="w-4 h-4" />
-                    {matchForm.editingMatchId ? 'Aggiorna partita' : 'Salva partita'}
+                    {isSavingMatch ? 'Salvataggio...' : matchForm.editingMatchId ? 'Aggiorna risultato' : 'Salva risultato'}
                   </button>
                   {!canSubmitMatch && (
                     <span className="text-sm text-text-secondary">Accedi come organizzatore o come giocatore iscritto per registrare una partita.</span>
@@ -925,7 +954,8 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                 )}
               </div>
             </div>
-          </div>
+          </fieldset>
+          </CenteredDialog>}
 
           <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -950,13 +980,16 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {breakdown && (
-                          <button onClick={() => setSelectedMatchId(match.id)} className="px-3 py-1 rounded bg-accent text-white text-xs font-semibold">Dettaglio punti</button>
+                          <button onClick={() => {
+                            setSelectedMatchId(match.id);
+                            requestAnimationFrame(() => pointsRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }));
+                          }} className="px-3 py-1 rounded bg-accent text-white text-xs font-semibold">Dettaglio punti</button>
                         )}
                         {canManageMatch(match, isOrganizer, loggedInPlayerId) && (
-                          <button onClick={() => handleEditMatch(match)} className="px-3 py-1 rounded bg-tertiary text-text-primary text-xs font-semibold">Modifica</button>
+                          <button disabled={isSavingMatch} onClick={() => handleEditMatch(match)} className="px-3 py-1 rounded bg-tertiary text-text-primary text-xs font-semibold">Modifica risultato</button>
                         )}
-                        {isOrganizer && (
-                          <button onClick={() => handleDeleteMatch(match)} className="px-3 py-1 rounded bg-red-600 text-white text-xs font-semibold">Elimina</button>
+                        {canManageMatch(match, isOrganizer, loggedInPlayerId) && (
+                          <button disabled={isSavingMatch} onClick={() => handleDeleteMatch(match)} className="px-3 py-1 rounded bg-red-600 text-white text-xs font-semibold">Elimina risultato</button>
                         )}
                       </div>
                     </div>
@@ -973,7 +1006,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
             </div>
 
             {selectedMatchBreakdown && (
-              <div className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 overflow-x-auto">
+              <div ref={pointsRef} className="rounded-xl border border-tertiary/40 bg-primary/30 p-4 overflow-x-auto scroll-mt-4">
                 <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="text-left text-text-secondary border-b border-tertiary/50">
