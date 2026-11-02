@@ -1,20 +1,24 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { type User } from '../types';
+import { type Player, type User } from '../types';
+import { updatePlayerProfile } from '../utils/updatePlayerProfile';
 
 interface AdminUsersModalProps {
   users: User[];
+  players: Player[];
   onClose: () => void;
 }
 
-type ActionType = 'editUsername' | 'changePassword' | 'resetPassword';
+type ActionType = 'editUsername' | 'editPlayer' | 'changePassword' | 'resetPassword';
 
 interface ActionState {
   userId: string;
   action: ActionType;
   // editUsername fields
   newUsername: string;
+  playerName: string;
+  playerPhone: string;
   // password fields
   newPassword: string;
   confirmPassword: string;
@@ -28,6 +32,8 @@ const initialAction = (userId: string, action: ActionType): ActionState => ({
   userId,
   action,
   newUsername: '',
+  playerName: '',
+  playerPhone: '',
   newPassword: '',
   confirmPassword: '',
   error: null,
@@ -36,16 +42,26 @@ const initialAction = (userId: string, action: ActionType): ActionState => ({
   confirming: false,
 });
 
-const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => {
+const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, players, onClose }) => {
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [localUsers, setLocalUsers] = useState<User[]>(users);
+
+  useEffect(() => {
+    setLocalUsers(users);
+  }, [users]);
 
   const sortedUsers = [...localUsers].sort((a, b) =>
     a.username.localeCompare(b.username, 'it', { sensitivity: 'base' })
   );
 
   const openAction = (userId: string, action: ActionType) => {
-    setActionState(initialAction(userId, action));
+    const user = localUsers.find(item => item.id === userId);
+    const player = players.find(item => item.id === user?.playerId);
+    setActionState({
+      ...initialAction(userId, action),
+      playerName: player?.name ?? '',
+      playerPhone: player?.phone ?? '',
+    });
   };
 
   const closeAction = () => {
@@ -53,7 +69,7 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
   };
 
   const handleChange = (
-    field: 'newUsername' | 'newPassword' | 'confirmPassword',
+    field: 'newUsername' | 'playerName' | 'playerPhone' | 'newPassword' | 'confirmPassword',
     value: string
   ) => {
     setActionState(prev =>
@@ -67,7 +83,14 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
 
     const { action, newUsername, newPassword, confirmPassword } = actionState;
 
-    if (action === 'editUsername') {
+    if (action === 'editPlayer') {
+      if (!actionState.playerName.trim()) {
+        setActionState(prev =>
+          prev ? { ...prev, error: 'Il nome del giocatore è obbligatorio.' } : prev
+        );
+        return;
+      }
+    } else if (action === 'editUsername') {
       if (!newUsername.trim()) {
         setActionState(prev =>
           prev ? { ...prev, error: 'Il nome utente è obbligatorio.' } : prev
@@ -114,12 +137,14 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
   };
 
   const handleConfirm = async () => {
-    if (!actionState) return;
+    if (!actionState || actionState.saving) return;
 
     setActionState(prev => prev ? { ...prev, saving: true, error: null } : prev);
 
     try {
-      if (actionState.action === 'editUsername') {
+      if (actionState.action === 'editPlayer') {
+        await updatePlayerProfile(actionState.userId, actionState.playerName, actionState.playerPhone);
+      } else if (actionState.action === 'editUsername') {
         await updateDoc(doc(db, 'users', actionState.userId), {
           username: actionState.newUsername.trim(),
         });
@@ -138,14 +163,14 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
       setActionState(prev =>
         prev ? { ...prev, saving: false, success: true, confirming: false } : prev
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       setActionState(prev =>
         prev
           ? {
               ...prev,
               saving: false,
               confirming: false,
-              error: err?.message ?? 'Errore durante il salvataggio.',
+              error: err instanceof Error ? err.message : 'Errore durante il salvataggio.',
             }
           : prev
       );
@@ -162,6 +187,7 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
 
   const actionLabel = (action: ActionType) => {
     if (action === 'editUsername') return 'Modifica username';
+    if (action === 'editPlayer') return 'Modifica giocatore';
     if (action === 'changePassword') return 'Modifica password';
     return 'Reimposta password';
   };
@@ -182,49 +208,70 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
 
         <p className="text-sm text-text-secondary mb-4">
           Elenco utenti in ordine alfabetico. Le password non vengono mostrate.
-          Puoi modificare il nome utente, cambiare la password o reimpostarla.
+          Puoi modificare username, nome del giocatore e telefono, cambiare la password o reimpostarla.
         </p>
 
         <div className="overflow-y-auto flex-1 space-y-2">
-          {sortedUsers.map(user => (
-            <div
-              key={user.id}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-primary rounded-lg px-4 py-3 border border-tertiary/50 gap-2"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="font-semibold text-text-primary truncate">{user.username}</span>
-                <span
-                  className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
-                    user.role === 'organizer'
-                      ? 'bg-highlight/20 text-highlight'
-                      : 'bg-tertiary text-text-secondary'
-                  }`}
-                >
-                  {user.role === 'organizer' ? 'Organizzatore' : 'Partecipante'}
-                </span>
+          {sortedUsers.map(user => {
+            const player = players.find(item => item.id === user.playerId);
+            return (
+              <div
+                key={user.id}
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-primary rounded-lg px-4 py-3 border border-tertiary/50 gap-2"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-semibold text-text-primary truncate">{user.username}</span>
+                    <span
+                      className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
+                        user.role === 'organizer'
+                          ? 'bg-highlight/20 text-highlight'
+                          : 'bg-tertiary text-text-secondary'
+                      }`}
+                    >
+                      {user.role === 'organizer' ? 'Organizzatore' : 'Partecipante'}
+                    </span>
+                  </div>
+                  {player && (
+                    <p className="text-xs text-text-secondary break-words mt-1">
+                      {player.name} · {player.phone || 'Telefono non inserito'}
+                    </p>
+                  )}
+                  {user.playerId && !player && (
+                    <p className="text-xs text-red-400 mt-1">Giocatore collegato non trovato.</p>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => openAction(user.id, 'editUsername')}
+                    className="text-xs bg-tertiary hover:bg-tertiary/80 text-text-primary font-semibold py-1.5 px-3 rounded-lg transition-colors"
+                  >
+                    Username
+                  </button>
+                  {player && (
+                    <button
+                      onClick={() => openAction(user.id, 'editPlayer')}
+                      className="text-xs bg-tertiary hover:bg-tertiary/80 text-text-primary font-semibold py-1.5 px-3 rounded-lg transition-colors"
+                    >
+                      Nome e telefono
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openAction(user.id, 'changePassword')}
+                    className="text-xs bg-accent/80 hover:bg-accent text-white font-semibold py-1.5 px-3 rounded-lg transition-colors"
+                  >
+                    Password
+                  </button>
+                  <button
+                    onClick={() => openAction(user.id, 'resetPassword')}
+                    className="text-xs bg-highlight/80 hover:bg-highlight text-white font-semibold py-1.5 px-3 rounded-lg transition-colors"
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => openAction(user.id, 'editUsername')}
-                  className="text-xs bg-tertiary hover:bg-tertiary/80 text-text-primary font-semibold py-1.5 px-3 rounded-lg transition-colors"
-                >
-                  Username
-                </button>
-                <button
-                  onClick={() => openAction(user.id, 'changePassword')}
-                  className="text-xs bg-accent/80 hover:bg-accent text-white font-semibold py-1.5 px-3 rounded-lg transition-colors"
-                >
-                  Password
-                </button>
-                <button
-                  onClick={() => openAction(user.id, 'resetPassword')}
-                  className="text-xs bg-highlight/80 hover:bg-highlight text-white font-semibold py-1.5 px-3 rounded-lg transition-colors"
-                >
-                  Reset
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           {sortedUsers.length === 0 && (
             <p className="text-text-secondary text-center py-6">Nessun utente trovato.</p>
@@ -242,7 +289,15 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
                   Conferma — {actionLabel(actionState.action)}
                 </h5>
                 <p className="text-sm text-text-secondary mb-4">
-                  {actionState.action === 'editUsername' ? (
+                  {actionState.action === 'editPlayer' ? (
+                    <>
+                      Stai per aggiornare il giocatore di{' '}
+                      <strong className="text-text-primary">{activeUser.username}</strong>: nome{' '}
+                      <strong className="text-text-primary">{actionState.playerName.trim()}</strong>, telefono{' '}
+                      <strong className="text-text-primary">{actionState.playerPhone.trim() || 'non inserito'}</strong>.
+                      {' '}La modifica sarà salvata in tutte le modalità. Lo username di accesso non cambia. Procedere?
+                    </>
+                  ) : actionState.action === 'editUsername' ? (
                     <>
                       Stai per cambiare il nome utente di{' '}
                       <strong className="text-text-primary">{activeUser.username}</strong> in{' '}
@@ -286,13 +341,46 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, onClose }) => 
                 </h5>
                 {actionState.success && (
                   <div className="text-sm text-green-400 mb-4">
-                    {actionState.action === 'editUsername'
+                    {actionState.action === 'editPlayer'
+                      ? 'Nome e telefono aggiornati in tutte le modalità!'
+                      : actionState.action === 'editUsername'
                       ? 'Nome utente aggiornato con successo!'
                       : 'Password aggiornata con successo!'}
                   </div>
                 )}
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  {actionState.action === 'editUsername' ? (
+                  {actionState.action === 'editPlayer' ? (
+                    <>
+                      <div>
+                        <label htmlFor="admin-player-name" className="block text-sm text-text-secondary mb-1">
+                          Nome del giocatore
+                        </label>
+                        <input
+                          id="admin-player-name"
+                          type="text"
+                          value={actionState.playerName}
+                          onChange={e => handleChange('playerName', e.target.value)}
+                          className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary focus:ring-2 focus:ring-accent focus:border-accent"
+                          autoFocus
+                          required
+                          disabled={actionState.saving}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="admin-player-phone" className="block text-sm text-text-secondary mb-1">
+                          Numero di telefono
+                        </label>
+                        <input
+                          id="admin-player-phone"
+                          type="tel"
+                          value={actionState.playerPhone}
+                          onChange={e => handleChange('playerPhone', e.target.value)}
+                          className="w-full bg-primary border border-tertiary rounded-lg p-2 text-text-primary focus:ring-2 focus:ring-accent focus:border-accent"
+                          disabled={actionState.saving}
+                        />
+                      </div>
+                    </>
+                  ) : actionState.action === 'editUsername' ? (
                     <div>
                       <label className="block text-sm text-text-secondary mb-1">
                         Nuovo nome utente
