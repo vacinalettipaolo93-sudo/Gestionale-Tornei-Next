@@ -45,6 +45,19 @@ export const getTournamentMatches = (tournament: Tournament): Match[] => [
   ...(tournament.consolationMatches ?? []),
 ];
 
+export function getEventSlots(event: Event): TimeSlot[] {
+  const slots = new Map<string, TimeSlot>();
+  const rawSlots = [
+    ...(event.globalTimeSlots ?? []),
+    ...event.tournaments.flatMap(tournament => tournament.timeSlots ?? []),
+  ];
+  for (const raw of rawSlots) {
+    const slot = normalizeTournamentSlot(raw);
+    if (slot && !slots.has(slot.id)) slots.set(slot.id, slot);
+  }
+  return [...slots.values()].sort((left, right) => Date.parse(left.start) - Date.parse(right.start));
+}
+
 const normalizeLabel = (label: string) => label.trim().toLocaleLowerCase('it');
 export function isSameCourtTime(left: TimeSlot, right: TimeSlot): boolean {
   const leftVenue = getSlotVenueId(left) ?? normalizeLabel(left.location);
@@ -66,10 +79,22 @@ export function isTournamentSlotBooked(tournament: Tournament, slot: TimeSlot, e
   });
 }
 
+export function isEventSlotBooked(
+  event: Event, slot: TimeSlot, excluding?: { tournamentId: string; matchId: string },
+): boolean {
+  const slots = getEventSlots(event);
+  return event.tournaments.some(tournament => isTournamentSlotBooked(
+    { ...tournament, timeSlots: slots },
+    slot,
+    tournament.id === excluding?.tournamentId ? excluding.matchId : undefined,
+  ));
+}
+
 export function getTournamentAvailabilitySlots(
-  _event: Event, tournament: Tournament, now = Date.now(), excludingMatchId?: string,
+  event: Event, tournament: Tournament, now = Date.now(), excludingMatchId?: string,
 ): TimeSlot[] {
-  return getTournamentSlots(tournament).filter(slot =>
-    Date.parse(slot.start) > now && !isTournamentSlotBooked(tournament, slot, excludingMatchId)
+  return getEventSlots(event).filter(slot =>
+    Date.parse(slot.start) > now && !isEventSlotBooked(event, slot,
+      excludingMatchId ? { tournamentId: tournament.id, matchId: excludingMatchId } : undefined)
   );
 }

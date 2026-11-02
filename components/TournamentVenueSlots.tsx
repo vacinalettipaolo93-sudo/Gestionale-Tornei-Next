@@ -1,37 +1,35 @@
 import React, { useEffect, useState } from 'react';
 import { type Event } from '../types';
 import { saveTournamentSlotAction } from '../services/tournamentBookingService';
-import { getTournamentSlots, isTournamentSlotBooked } from '../utils/tournamentAvailability';
+import { getEventSlots, isEventSlotBooked } from '../utils/tournamentAvailability';
 import { formatTournamentSlotDate, formatTournamentSlotTime, getSlotVenueId, TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 
 const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId }> = ({ event, venueId }) => {
-  const [tournamentId, setTournamentId] = useState('');
   const [start, setStart] = useState('');
   const [field, setField] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const tournament = event.tournaments.find(item => item.id === tournamentId);
   const venue = TOURNAMENT_VENUES.find(item => item.id === venueId)!;
-  const slots = tournament ? getTournamentSlots(tournament).filter(slot => getSlotVenueId(slot) === venueId) : [];
+  const slots = getEventSlots(event).filter(slot => getSlotVenueId(slot) === venueId);
 
   useEffect(() => {
     setError(null);
     setSuccess(null);
-  }, [event.id, tournamentId, venueId]);
+  }, [event.id, venueId]);
 
   const addSlot = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tournament || saving) return;
+    if (saving) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      await saveTournamentSlotAction(event.id, tournament.id, {
+      await saveTournamentSlotAction(event.id, undefined, {
         type: 'add',
         slot: { id: `slot_${crypto.randomUUID()}`, start, field, location: venue.name, venueId },
       }, { isOrganizer: true });
-      setSuccess(`Slot aggiunto a ${tournament.name} — ${venue.name}.`);
+      setSuccess(`Slot aggiunto a ${event.name} — ${venue.name}, disponibile in tutti i tornei dell’evento.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Impossibile salvare lo slot.');
     } finally {
@@ -40,12 +38,12 @@ const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId 
   };
 
   const deleteSlot = async (slotId: string) => {
-    if (!tournament || saving || !window.confirm('Eliminare questo slot libero dal torneo selezionato?')) return;
+    if (saving || !window.confirm('Eliminare questo slot libero da tutti i tornei dell’evento?')) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      await saveTournamentSlotAction(event.id, tournament.id, { type: 'delete', slotId }, { isOrganizer: true });
+      await saveTournamentSlotAction(event.id, undefined, { type: 'delete', slotId }, { isOrganizer: true });
       setSuccess('Slot eliminato.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Impossibile eliminare lo slot.');
@@ -58,70 +56,53 @@ const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId 
     <section className="bg-secondary rounded-xl p-4 sm:p-6 space-y-5" aria-label={`Slot orari ${venue.name}`}>
       <h2 className="text-xl font-bold text-accent">Slot orari {venue.name}</h2>
       <p className="text-sm text-text-secondary">
-        Seleziona il torneo e inserisci un giorno, un orario e un campo per ogni slot libero.
-        Disponibilità e prenotazioni restano esclusivamente in quel torneo: nessuna condivisione con altri tornei o eventi.
+        Inserisci un giorno, un orario e un campo per ogni slot libero di {event.name}.
+        Gli slot sono condivisi da tutti i tornei di questo evento: una prenotazione li occupa per tutti.
+        Gli altri eventi restano indipendenti.
       </p>
-      <div>
-        <label htmlFor="venue-slots-tournament" className="block font-semibold mb-2">Torneo a cui assegnare gli slot</label>
-        <select
-          id="venue-slots-tournament"
-          value={tournamentId}
-          onChange={e => setTournamentId(e.target.value)}
-          disabled={saving}
-          className="w-full bg-primary border border-tertiary p-3 rounded-lg text-text-primary"
-        >
-          <option value="">Seleziona un torneo</option>
-          {event.tournaments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        {event.tournaments.length === 0 && <p className="text-sm text-text-secondary mt-2">Crea prima un torneo nella scheda Tornei.</p>}
-      </div>
       {error && <p role="alert" className="text-red-400">{error}</p>}
       {success && <p role="status" className="text-green-400">{success}</p>}
-      {tournament && (
-        <>
-          <form onSubmit={addSlot} className="bg-primary p-4 rounded-lg space-y-4">
-            <h3 className="font-bold">Aggiungi slot libero — {tournament.name}</h3>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="venue-slot-start" className="block text-sm font-semibold mb-1">Giorno e ora</label>
-                <input id="venue-slot-start" type="datetime-local" value={start} onChange={e => setStart(e.target.value)} required disabled={saving} className="w-full bg-secondary border border-tertiary p-3 rounded-lg text-text-primary" />
-              </div>
-              <div>
-                <label htmlFor="venue-slot-field" className="block text-sm font-semibold mb-1">Campo</label>
-                <input id="venue-slot-field" value={field} onChange={e => setField(e.target.value)} placeholder="Es. Campo 1" required disabled={saving} className="w-full bg-secondary border border-tertiary p-3 rounded-lg text-text-primary" />
-              </div>
-            </div>
-            <button type="submit" disabled={saving} className="bg-accent text-white font-bold rounded-lg px-4 py-2 disabled:opacity-50">
-              {saving ? 'Salvataggio…' : 'Aggiungi slot'}
-            </button>
-          </form>
-          <div className="space-y-3">
-            <h3 className="font-bold">Slot di {tournament.name} — {venue.name}</h3>
-            {slots.length === 0 && <p className="text-text-secondary">Nessuno slot inserito per questo centro nel torneo selezionato.</p>}
-            {slots.map(slot => {
-              const booked = isTournamentSlotBooked(tournament, slot);
-              const past = Date.parse(slot.start) <= Date.now();
-              return (
-                <div key={slot.id} className="bg-primary border border-tertiary rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{formatTournamentSlotDate(slot.start)}</p>
-                    <p>{formatTournamentSlotTime(slot.start)} · {slot.field || 'Campo non specificato'}</p>
-                    <p className={`text-sm ${booked ? 'text-highlight' : 'text-text-secondary'}`}>{booked ? 'Prenotato' : past ? 'Trascorso' : 'Libero'}</p>
-                  </div>
-                  <button
-                    onClick={() => deleteSlot(slot.id)}
-                    disabled={saving || booked}
-                    title={booked ? 'Annulla prima la prenotazione dalla partita' : undefined}
-                    className="bg-tertiary text-red-400 px-3 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Elimina slot
-                  </button>
-                </div>
-              );
-            })}
+      <form onSubmit={addSlot} className="bg-primary p-4 rounded-lg space-y-4">
+        <h3 className="font-bold">Aggiungi slot libero — {event.name}</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="venue-slot-start" className="block text-sm font-semibold mb-1">Giorno e ora</label>
+            <input id="venue-slot-start" type="datetime-local" value={start} onChange={e => setStart(e.target.value)} required disabled={saving} className="w-full bg-secondary border border-tertiary p-3 rounded-lg text-text-primary" />
           </div>
-        </>
-      )}
+          <div>
+            <label htmlFor="venue-slot-field" className="block text-sm font-semibold mb-1">Campo</label>
+            <input id="venue-slot-field" value={field} onChange={e => setField(e.target.value)} placeholder="Es. Campo 1" required disabled={saving} className="w-full bg-secondary border border-tertiary p-3 rounded-lg text-text-primary" />
+          </div>
+        </div>
+        <button type="submit" disabled={saving} className="bg-accent text-white font-bold rounded-lg px-4 py-2 disabled:opacity-50">
+          {saving ? 'Salvataggio…' : 'Aggiungi slot'}
+        </button>
+      </form>
+      <div className="space-y-3">
+        <h3 className="font-bold">Slot di {event.name} — {venue.name}</h3>
+        {slots.length === 0 && <p className="text-text-secondary">Nessuno slot inserito per questo centro nell’evento.</p>}
+        {slots.map(slot => {
+          const booked = isEventSlotBooked(event, slot);
+          const past = Date.parse(slot.start) <= Date.now();
+          return (
+            <div key={slot.id} className="bg-primary border border-tertiary rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">{formatTournamentSlotDate(slot.start)}</p>
+                <p>{formatTournamentSlotTime(slot.start)} · {slot.field || 'Campo non specificato'}</p>
+                <p className={`text-sm ${booked ? 'text-highlight' : 'text-text-secondary'}`}>{booked ? 'Prenotato' : past ? 'Trascorso' : 'Libero'}</p>
+              </div>
+              <button
+                onClick={() => deleteSlot(slot.id)}
+                disabled={saving || booked}
+                title={booked ? 'Annulla prima la prenotazione dalla partita' : undefined}
+                className="bg-tertiary text-red-400 px-3 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Elimina slot
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 };

@@ -86,20 +86,20 @@ const TournamentBookingModal: React.FC<{
                     className="text-left border-2 border-accent rounded-xl bg-primary hover:bg-tertiary p-6 space-y-2 focus:ring-2 focus:ring-accent"
                   >
                     <span className="block text-xl font-bold text-accent">{venue.name}</span>
-                    <span className="block text-sm text-text-secondary">{count > 0 ? `${count} slot liberi in questo torneo` : 'Nessuno slot libero in questo torneo'}</span>
+                    <span className="block text-sm text-text-secondary">{count > 0 ? `${count} slot liberi in questo evento` : 'Nessuno slot libero in questo evento'}</span>
                   </button>
                 );
               })}
             </div>
             {slots.some(slot => !getSlotVenueId(slot)) && (
-              <button onClick={() => setVenueId('legacy')} className="text-sm text-accent underline">Altri slot esistenti del torneo</button>
+              <button onClick={() => setVenueId('legacy')} className="text-sm text-accent underline">Altri slot esistenti dell’evento</button>
             )}
           </>
         ) : (
           <>
             <button onClick={() => { setVenueId(null); setSlotId(''); setError(null); }} disabled={saving} className="text-accent font-semibold hover:underline">Cambia centro</button>
             <h4 className="font-bold">2. Scegli giorno, orario e campo — {venueName}</h4>
-            {venueSlots.length === 0 && <p className="text-text-secondary">Nessuno slot futuro libero per questo centro nel torneo. Scegli l’altro centro oppure attendi nuovi slot dall’amministratore.</p>}
+            {venueSlots.length === 0 && <p className="text-text-secondary">Nessuno slot futuro libero per questo centro nell’evento. Scegli l’altro centro oppure attendi nuovi slot dall’amministratore.</p>}
             {dates.map(date => {
               const dateSlots = venueSlots.filter(slot => getAvailabilityDateKey(slot.start) === date);
               return (

@@ -195,7 +195,7 @@ test('slot normalization supports legacy aliases, timestamps and rejects invalid
   assert.equal(normalizeTournamentSlot({ id: 'out-of-range', start: 1e20 }), null);
 });
 
-test('only tournament-local future free slots survive, including bookings in its own groups and finals', () => {
+test('only event-wide future free slots survive, including bookings in groups and finals', () => {
   const t = tournament({
     timeSlots: [
       slot('s1'), slot('s1'), slot('old', '2029-01-01T00:00:00Z'), slot('invalid', 'bad'),
@@ -223,15 +223,26 @@ test('only tournament-local future free slots survive, including bookings in its
   assert.deepEqual(getTournamentAvailabilitySlots(e, t, now).map(item => item.id), ['s1']);
 });
 
-test('other tournaments and legacy event-wide slots do not affect local availability or matching', () => {
+test('bookings in another tournament of the event also remove slots from matching suggestions', () => {
   const t = tournament();
   const other = tournament({ id: 'other', groups: [{ matches: [pending('busy', 'c', 'd', { slotId: 's1' })] }] });
   const e = event(t, { tournaments: [t, other], globalTimeSlots: [slot('global-only')] });
-  assert.deepEqual(getTournamentAvailabilitySlots(e, t, now).map(item => item.id), ['s1']);
-  assert.equal(getTournamentMatchSuggestions(e, t, 'a', availability(), now).length, 1);
+  assert.deepEqual(getTournamentAvailabilitySlots(e, t, now), []);
+  assert.equal(getTournamentMatchSuggestions(e, t, 'a', availability(), now).length, 0);
   const empty = { ...t, timeSlots: [] };
   assert.deepEqual(getTournamentAvailabilitySlots(e, empty, now), []);
   assert.deepEqual(getTournamentMatchSuggestions(e, empty, 'a', availability(), now), []);
+});
+
+test('event-global and old tournament slots appear in every tournament without exposing other events', () => {
+  const first = tournament();
+  const second = tournament({ id: 'second', timeSlots: [] });
+  const e = event(first, { tournaments: [first, second], globalTimeSlots: [slot('global', '2030-07-01T18:00:00Z')] });
+  for (const t of e.tournaments) {
+    assert.deepEqual(getTournamentAvailabilitySlots(e, t, now).map(item => item.id), ['s1', 'global']);
+  }
+  const otherEvent = event(second, { tournaments: [second], globalTimeSlots: [] });
+  assert.deepEqual(getTournamentAvailabilitySlots(otherEvent, second, now), []);
 });
 
 test('availability edits and fixture completion immediately change recomputed suggestions without mutating input', () => {
