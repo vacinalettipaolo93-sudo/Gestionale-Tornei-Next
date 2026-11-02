@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { RankingMatchFinder } from './MatchFinder';
 import {
   type Match,
   type Player,
@@ -55,6 +56,7 @@ interface PadelIndividualRankingViewProps {
   loggedInPlayerId?: string;
   onSaveRankingData: (nextData: SummerRankingData) => Promise<void>;
   onOpenPlayersAdmin?: () => void;
+  onPlayerContact: (player: Player) => void;
   title?: string;
   description?: string;
   playersAdminLabel?: string;
@@ -159,6 +161,7 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
   loggedInPlayerId,
   onSaveRankingData,
   onOpenPlayersAdmin,
+  onPlayerContact,
   title,
   description,
   playersAdminLabel,
@@ -812,6 +815,16 @@ const PadelIndividualRankingView: React.FC<PadelIndividualRankingViewProps> = ({
 
       {activeTab === 'matches' && (
         <div className="space-y-4 sm:space-y-6">
+          {!isOrganizer && currentPlayer && (
+            <RankingMatchFinder
+              currentPlayerId={currentPlayer.id}
+              opponents={confirmedPlayers}
+              availabilities={rankingData.availabilities}
+              onAvailability={() => setActiveTab('availability')}
+              onPlayerContact={onPlayerContact}
+              description="Giocatori con almeno un giorno e una fascia oraria in comune con te. Nel ranking Padel a partner liberi la compatibilità è con il singolo avversario: concordate anche la presenza degli altri due giocatori."
+            />
+          )}
           <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>

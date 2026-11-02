@@ -28,3 +28,11 @@ Gli eventi legacy senza `eventType` sono considerati tornei Tennis, come nel res
 ## Controllo utenti amministratore
 
 In **Controllo Utenti**, il pulsante **Nome e telefono** permette di modificare i dati del giocatore collegato all'account. Il nome è obbligatorio; il telefono può essere modificato o svuotato. Dopo la conferma, un'unica transazione Firestore aggiorna l'archivio globale `players` e le copie del giocatore negli eventi, inclusi tornei e ranking Tennis e Padel. I listener esistenti mostrano i dati aggiornati anche agli altri utenti. Username, password, identificativo, iscrizioni, risultati e punti del giocatore non cambiano. Gli account senza giocatore collegato mantengono le sole azioni su username e password.
+
+## Cerca partita per i partecipanti
+
+Nel tab **Partite** di tutte le modalità, **Cerca partita** propone avversari con disponibilità dichiarate in comune e permette di contattarli. **Modifica disponibilità** apre la scheda per inserirle o aggiornarle; l'assenza di dichiarazioni non viene interpretata come disponibilità.
+
+Nei ranking Tennis e Padel individuale si confrontano giorno della settimana e fascia oraria, rispettando anche i formati storici delle disponibilità e le esclusioni salvate. Nel Tennis gli avversari devono essere ancora sfidabili secondo il limite di incontri del regolamento e il pulsante **Sfida** apre la creazione partita esistente. Nel Padel individuale i suggerimenti riguardano il singolo avversario: occorre concordare anche gli altri due giocatori per completare le coppie.
+
+Nei tornei vengono proposti solo gli avversari di incontri non completati del torneo, inclusi playoff e consolazione già definiti. Entrambi devono aver selezionato **Voglio giocare** sullo stesso slot futuro e libero, senza aver escluso quella data. Nel Padel a coppie la scheda **Disponibilità di gioco** raccoglie le preferenze dei singoli giocatori e lo slot deve essere scelto da tutti e quattro. Le preferenze usano le collezioni Firebase esistenti `slot_preferences` e `date_unavailabilities`, aggiornate in tempo reale; non vengono effettuate prenotazioni automatiche.

@@ -20,6 +20,7 @@ import Playoffs from './Playoffs';
 import ConsolationBracket from './ConsolationBracket';
 import PlayerManagement from './PlayerManagement';
 import AvailabilityTab from './AvailabilityTab';
+import { TournamentMatchFinder } from './MatchFinder';
 import { db } from "../firebase";
 import { updateDoc, doc } from "firebase/firestore";
 import { getCompetitorName, getTeamForPlayer, getTournamentCompetitors, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
@@ -1002,16 +1003,14 @@ const TournamentView: React.FC<TournamentViewProps> = ({
         >
           Partite
         </button>
-        {!isPadel && (
-          <button onClick={() => setActiveTab('availability')}
-            className={`px-4 py-2 rounded-full ${activeTab === 'availability'
-              ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-              : 'bg-transparent text-accent'
-            }`}
-          >
-            Disponibilità di gioco
-          </button>
-        )}
+        <button onClick={() => setActiveTab('availability')}
+          className={`px-4 py-2 rounded-full ${activeTab === 'availability'
+            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
+            : 'bg-transparent text-accent'
+          }`}
+        >
+          Disponibilità di gioco
+        </button>
         {!isOrganizer && (
           <button onClick={() => setActiveTab('participants')}
             className={`px-4 py-2 rounded-full ${activeTab === 'participants'
@@ -1111,6 +1110,15 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
         {activeTab === 'matches' && (
           <div className="space-y-10">
+            {!isOrganizer && loggedInPlayerId && (
+              <TournamentMatchFinder
+                event={event}
+                tournament={tournament}
+                currentPlayerId={loggedInPlayerId}
+                onAvailability={() => setActiveTab('availability')}
+                onPlayerContact={handlePlayerContact}
+              />
+            )}
             {Array.isArray(t.playoffMatches) && t.playoffMatches.length > 0 && (
               <div>
                 <h3 className="text-xl font-bold mb-3 text-accent">Playoff</h3>
@@ -1269,8 +1277,18 @@ const TournamentView: React.FC<TournamentViewProps> = ({
           <ParticipantsTab event={event} tournament={tournament} loggedInPlayerId={loggedInPlayerId} />
         )}
 
-        {activeTab === 'availability' && !isPadel && selectedGroup && (
-          <AvailabilityTab event={event} tournament={tournament} selectedGroup={selectedGroup} loggedInPlayerId={loggedInPlayerId} />
+        {activeTab === 'availability' && (
+          <AvailabilityTab
+            event={event}
+            tournament={tournament}
+            selectedGroup={{
+              id: `${tournament.id}-availability`,
+              name: 'Disponibilità torneo',
+              playerIds: event.players.map(player => player.id),
+              matches: [],
+            }}
+            loggedInPlayerId={loggedInPlayerId}
+          />
         )}
 
         {activeTab === 'playoffs' && (
