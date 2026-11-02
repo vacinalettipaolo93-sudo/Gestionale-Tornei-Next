@@ -8,6 +8,7 @@ import { TrashIcon, PlusIcon } from './Icons';
 import AdminMatchCounts from "./AdminMatchCounts";
 import TournamentVenueSlots from './TournamentVenueSlots';
 import BookedVenueSlots from './BookedVenueSlots';
+import { useSectionScroll } from './useSectionScroll';
 import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 
 interface EventViewProps {
@@ -52,6 +53,7 @@ const EventView: React.FC<EventViewProps> = ({
   const [editTournamentName, setEditTournamentName] = useState<string>('');
   const [editTournamentLoading, setEditTournamentLoading] = useState<boolean>(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminEventSection>('tournaments');
+  const sectionRef = useSectionScroll(`${event.id}:${activeAdminSection}`);
 
   useEffect(() => {
     setRulesDraft(event.rules ?? "");
@@ -231,10 +233,10 @@ const EventView: React.FC<EventViewProps> = ({
   };
 
   return (
-    <div>
+    <div ref={sectionRef} className="min-w-0 scroll-mt-4">
       <div className="bg-primary p-6 rounded-xl shadow-lg mb-6">
-        <div className="flex justify-between items-start gap-6">
-          <div className="flex-1">
+        <div className="flex flex-wrap justify-between items-start gap-4">
+          <div className="flex-1 min-w-0">
             <h1 className="text-3xl font-bold text-white mb-1">{event.name}</h1>
             <div className="text-sm text-text-secondary">
               Codice Invito: <span className="font-bold text-accent">{event.invitationCode}</span>
@@ -242,7 +244,7 @@ const EventView: React.FC<EventViewProps> = ({
           </div>
 
           {isOrganizer && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={openAddTournament}
@@ -509,7 +511,7 @@ const EventView: React.FC<EventViewProps> = ({
 
       {/* ----------------- MODAL: AGGIUNGI TORNEO ----------------- */}
       {isAddTournamentOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify_center z-50">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-secondary rounded-xl shadow-2xl p-6 w-full max-w-md border border-tertiary">
             <h4 className="text-lg font-bold mb-4 text-accent">Aggiungi Nuovo Torneo</h4>
             <form onSubmit={handleAddTournament} className="space-y-4">

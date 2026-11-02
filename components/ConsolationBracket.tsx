@@ -11,6 +11,7 @@ interface ConsolationBracketProps {
     setEvents: React.Dispatch<React.SetStateAction<Event[]>>;
     isOrganizer: boolean;
     loggedInPlayerId?: string;
+    onEditResult: (match: Match) => void;
 }
 
 function consolationMatchToLeagueMatchId(conMatchId: string) {
@@ -29,9 +30,9 @@ function buildLeagueMatchFromConsolationPlayoffMatch(pm: PlayoffMatch): Match | 
   };
 }
 
-const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tournament, setEvents, isOrganizer, loggedInPlayerId }) => {
+const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tournament, setEvents, isOrganizer, loggedInPlayerId, onEditResult }) => {
     const [view, setView] = useState<'setup' | 'bracket'>(tournament.consolationBracket?.isGenerated ? 'bracket' : 'setup');
-    const competitors = getTournamentCompetitors(event, tournament);
+    const competitors = useMemo(() => getTournamentCompetitors(event, tournament), [event.players, tournament]);
     
     const qualifiers = useMemo(() => {
         const allQualifiers: { playerId: string, rank: number, fromGroup: string, groupName: string }[] = [];
@@ -58,9 +59,6 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
     }, [qualifiers]);
     
     const [firstRoundAssignments, setFirstRoundAssignments] = useState<(string | null)[]>([]);
-    const [editingMatch, setEditingMatch] = useState<PlayoffMatch | null>(null);
-    const [score1, setScore1] = useState('');
-    const [score2, setScore2] = useState('');
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
     useEffect(() => {
@@ -186,88 +184,6 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
         setIsResetModalOpen(false);
     };
 
-    const handleSaveResult = async () => {
-        if (!editingMatch) return;
-
-        const s1 = parseInt(score1, 10);
-        const s2 = parseInt(score2, 10);
-        if (isNaN(s1) || isNaN(s2)) return;
-
-        const currentBracket = tournament.consolationBracket;
-        if (!currentBracket) return;
-
-        const bracketCopy: PlayoffBracket = JSON.parse(JSON.stringify(currentBracket));
-        const match = bracketCopy.matches.find((m: PlayoffMatch) => m.id === editingMatch.id);
-        if (!match) return;
-
-        match.score1 = s1;
-        match.score2 = s2;
-
-        if (s1 === s2) {
-          alert("Pareggio non valido. Inserisci un vincitore.");
-          return;
-        }
-
-        const winnerId = s1 > s2 ? match.player1Id : match.player2Id;
-        if (!winnerId) return;
-        match.winnerId = winnerId;
-
-        if (match.nextMatchId) {
-            const nextMatch = bracketCopy.matches.find((m: PlayoffMatch) => m.id === match.nextMatchId);
-            if (nextMatch) {
-                const allMatchesInRound = bracketCopy.matches
-                  .filter((m: PlayoffMatch) => m.round === match.round)
-                  .sort((a: PlayoffMatch, b: PlayoffMatch) => a.matchIndex - b.matchIndex);
-
-                const matchIndexInRound = allMatchesInRound.findIndex((m: PlayoffMatch) => m.id === match.id);
-                if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
-                else nextMatch.player2Id = winnerId;
-            }
-        }
-
-        const consolationMatches = Array.isArray(tournament.consolationMatches)
-          ? JSON.parse(JSON.stringify(tournament.consolationMatches)) as Match[]
-          : [];
-
-        const leagueMatchId = consolationMatchToLeagueMatchId(match.id);
-        const idx = consolationMatches.findIndex(m => m.id === leagueMatchId);
-        if (idx !== -1) {
-          consolationMatches[idx] = {
-            ...consolationMatches[idx],
-            score1: s1,
-            score2: s2,
-            status: 'completed',
-          };
-        } else {
-          const built = buildLeagueMatchFromConsolationPlayoffMatch(match);
-          if (built) consolationMatches.push({ ...built, score1: s1, score2: s2, status: 'completed' });
-        }
-
-        // crea/aggiorna match del turno successivo se pronto
-        if (match.nextMatchId) {
-          const nextMatch = bracketCopy.matches.find(m => m.id === match.nextMatchId);
-          const builtNext = nextMatch ? buildLeagueMatchFromConsolationPlayoffMatch(nextMatch) : null;
-          if (builtNext) {
-            const nidx = consolationMatches.findIndex(m => m.id === builtNext.id);
-            if (nidx === -1) consolationMatches.push(builtNext);
-            else consolationMatches[nidx] = { ...consolationMatches[nidx], ...builtNext, score1: consolationMatches[nidx].score1 ?? null, score2: consolationMatches[nidx].score2 ?? null };
-          }
-        }
-
-        const updatedTournaments = event.tournaments.map(t =>
-          t.id === tournament.id
-            ? { ...t, consolationBracket: bracketCopy, consolationMatches }
-            : t
-        );
-
-        setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-        await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-        setEditingMatch(null);
-        setScore1('');
-        setScore2('');
-    };
-
     if (view === 'setup') {
         if (!isOrganizer) return <p className="text-text-secondary text-center">Il tabellone di consolazione non è stato ancora generato.</p>;
         
@@ -387,7 +303,8 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
     const MatchCard = ({ match }: { match: PlayoffMatch; }) => {
         const p1 = getPlayer(match.player1Id);
         const p2 = getPlayer(match.player2Id);
-        const canEdit = isOrganizer && match.player1Id && match.player2Id && match.winnerId === null;
+        const canEdit = match.player1Id && match.player2Id
+          && (isOrganizer || !!loggedInPlayerId && [match.player1Id, match.player2Id].includes(loggedInPlayerId));
         
         return (
             <div className={`bg-secondary p-2 rounded-lg w-full`}>
@@ -402,7 +319,11 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
                 </div>
                 {canEdit && (
                     <div className="text-center mt-2">
-                        <button onClick={() => { setEditingMatch(match); setScore1(match.score1?.toString() ?? ''); setScore2(match.score2?.toString() ?? ''); }} className="text-xs bg-highlight/80 hover:bg-highlight text-white px-3 py-1 rounded-lg font-bold">Inserisci Risultato</button>
+                        <button onClick={() => {
+                          const mirror = tournament.consolationMatches?.find(item => item.id === consolationMatchToLeagueMatchId(match.id))
+                            ?? buildLeagueMatchFromConsolationPlayoffMatch(match);
+                          if (mirror) onEditResult(mirror);
+                        }} className="text-xs bg-highlight/80 hover:bg-highlight text-white px-3 py-1 rounded-lg font-bold">Inserisci Risultato</button>
                     </div>
                 )}
             </div>
@@ -447,26 +368,6 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
                  </div>
              </div>
 
-             {isOrganizer && editingMatch && (
-                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fadeIn">
-                    <div className="bg-secondary rounded-xl shadow-2xl p-6 w-full max-w-sm border border-tertiary">
-                        <h4 className="text-lg font-bold mb-4">Risultato Consolazione</h4>
-                        <div className="flex items-center justify-between gap-4">
-                        <span className="font-semibold">{getPlayer(editingMatch.player1Id)?.name}</span>
-                        <div className="flex gap-2">
-                            <input type="number" value={score1} onChange={e => setScore1(e.target.value)} className="w-16 text-center bg-primary p-2 rounded-lg" />
-                            <span>-</span>
-                            <input type="number" value={score2} onChange={e => setScore2(e.target.value)} className="w-16 text-center bg-primary p-2 rounded-lg" />
-                        </div>
-                        <span className="font-semibold">{getPlayer(editingMatch.player2Id)?.name}</span>
-                        </div>
-                        <div className="flex justify-end gap-4 mt-6">
-                            <button onClick={() => setEditingMatch(null)} className="bg-tertiary hover:bg-tertiary/80 text-text-primary font-bold py-2 px-4 rounded-lg transition-colors">Annulla</button>
-                            <button onClick={handleSaveResult} className="bg-highlight hover:bg-highlight/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">Salva</button>
-                        </div>
-                    </div>
-                </div>
-            )}
             {isOrganizer && isResetModalOpen && (
                  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fadeIn">
                     <div className="bg-secondary rounded-xl shadow-2xl p-6 w-full max-w-md border border-tertiary">

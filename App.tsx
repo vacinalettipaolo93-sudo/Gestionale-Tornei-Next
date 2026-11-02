@@ -3,6 +3,8 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { type Event, type Tournament, type User, type Player, type SummerRankingData } from './types';
 import EventView from './components/EventView';
 import ExpiredSlotCleanup from './components/ExpiredSlotCleanup';
+import { useSectionScroll } from './components/useSectionScroll';
+import { saveRankingChanges } from './services/rankingDataService';
 import TournamentView from './components/TournamentView';
 import Login from './components/Login';
 import EditProfileModal from './components/EditProfileModal';
@@ -97,6 +99,7 @@ const App: React.FC = () => {
 
   const isOrganizer = currentUser?.role === 'organizer';
   const loggedInPlayerId = currentUser?.playerId;
+  const mainRef = useSectionScroll(`${currentUser?.id}:${currentView}:${selectedEvent?.id}:${selectedTournament?.id}`);
 
   const changeAdminFilters = (next: typeof adminFilters) => {
     setAdminFilters(next);
@@ -250,20 +253,10 @@ const App: React.FC = () => {
   };
 
   const saveEventRankingData = async (eventId: string, eventType: EventType, nextData: SummerRankingData) => {
-    const normalized = normalizeRankingData(nextData, eventType);
-    setEvents(prevEvents => prevEvents.map(event =>
-      event.id === eventId
-        ? { ...event, eventType, rankingData: normalized }
-        : event
-    ));
-    if (selectedEvent?.id === eventId) {
-      setSelectedEvent(prev => prev ? { ...prev, eventType, rankingData: normalized } : prev);
-    }
-    const sanitized = sanitizeRankingDataForFirestore(normalized, eventType);
-    await updateDoc(doc(db, "events", eventId), {
-      eventType,
-      rankingData: sanitized,
-    });
+    const event = events.find(item => item.id === eventId);
+    if (!event) throw new Error('Evento non trovato.');
+    await saveRankingChanges(eventId, eventType, event.rankingData ?? createEmptyRankingData(eventType),
+      nextData, { isOrganizer, playerId: loggedInPlayerId });
   };
 
   const updatePlayerSummerRankingStartPoints = async (playerId: string, points: number) => {
@@ -900,20 +893,20 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-primary text-text-primary p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen min-w-0 bg-primary text-text-primary p-3 sm:p-6 lg:p-8">
       {events.filter(event => isOrganizer || event.players.some(player => player.id === loggedInPlayerId)).map(event => (
         <ExpiredSlotCleanup key={event.id} event={event} isOrganizer={isOrganizer} playerId={loggedInPlayerId} />
       ))}
       <header className="mb-8">
-        <div className="max-w-7xl mx-auto flex justify-between items-center gap-4">
-          <div className="flex items-center gap-4 min-w-0">
-            <NextTsBrandIcon className="w-28 sm:w-36 lg:w-44 h-auto flex-shrink-0" />
+        <div className="max-w-7xl mx-auto flex justify-between items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <NextTsBrandIcon className="w-14 sm:w-36 lg:w-44 h-auto flex-shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight truncate">Tournament Manager Pro</h1>
+              <h1 className="text-base sm:text-2xl lg:text-3xl font-bold tracking-tight">Tournament Manager Pro</h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center shrink-0 gap-2 sm:gap-4">
             <span className="text-sm text-text-secondary hidden sm:block">
               Accesso come: <strong className="text-text-primary">{currentUser.username}</strong>
             </span>
@@ -940,14 +933,14 @@ const App: React.FC = () => {
                 })()}
               </button>
 
-            <button onClick={handleLogout} className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors">
+            <button onClick={handleLogout} aria-label="Esci" className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors">
               <LogoutIcon className="w-6 h-6" />
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto">
+      <main ref={mainRef} className="min-w-0 max-w-7xl mx-auto scroll-mt-4">
         {currentView !== 'dashboard' && (
           <button onClick={navigateBack} className="flex items-center gap-2 text-accent-hover hover:text-accent font-semibold mb-6 transition-colors">
             <BackArrowIcon className="w-5 h-5" />

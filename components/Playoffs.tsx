@@ -11,6 +11,7 @@ interface PlayoffsProps {
   setEvents: React.Dispatch<React.SetStateAction<Event[]>>;
   isOrganizer: boolean;
   loggedInPlayerId?: string;
+  onEditResult: (match: Match) => void;
 }
 
 type PlayoffWithdrawal = { groupId: string; playerId: string };
@@ -35,9 +36,9 @@ function buildLeagueMatchFromPlayoffMatch(pm: PlayoffMatch): Match | null {
   };
 }
 
-const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrganizer, loggedInPlayerId }) => {
+const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrganizer, loggedInPlayerId, onEditResult }) => {
   const tt = tournament as TournamentWithWithdrawals;
-  const competitors = getTournamentCompetitors(event, tournament);
+  const competitors = useMemo(() => getTournamentCompetitors(event, tournament), [event.players, tournament]);
 
   const [view, setView] = useState<'setup' | 'bracket'>(tournament.playoffs?.isGenerated ? 'bracket' : 'setup');
 
@@ -89,9 +90,6 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
   }, [qualifiers]);
 
   const [firstRoundAssignments, setFirstRoundAssignments] = useState<(string | null)[]>([]);
-  const [editingMatch, setEditingMatch] = useState<PlayoffMatch | null>(null);
-  const [score1, setScore1] = useState('');
-  const [score2, setScore2] = useState('');
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   useEffect(() => {
@@ -305,103 +303,6 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
     setIsResetModalOpen(false);
   };
 
-  const handleSaveResult = async () => {
-    if (!editingMatch) return;
-
-    const s1 = parseInt(score1, 10);
-    const s2 = parseInt(score2, 10);
-    if (isNaN(s1) || isNaN(s2)) return;
-
-    const currentBracket = tournament.playoffs;
-    if (!currentBracket) return;
-
-    const bracketCopy: PlayoffBracket = JSON.parse(JSON.stringify(currentBracket));
-    const match = bracketCopy.matches.find((m: PlayoffMatch) => m.id === editingMatch.id);
-    if (!match) return;
-
-    match.score1 = s1;
-    match.score2 = s2;
-
-    if (s1 === s2) {
-      alert("Pareggio non valido nei playoff. Inserisci un vincitore.");
-      return;
-    }
-
-    const winnerId = s1 > s2 ? match.player1Id : match.player2Id;
-    const loserId = s1 > s2 ? match.player2Id : match.player1Id;
-    if (!winnerId || !loserId) return;
-
-    match.winnerId = winnerId;
-
-    if (match.nextMatchId) {
-      const nextMatch = bracketCopy.matches.find((m: PlayoffMatch) => m.id === match.nextMatchId);
-      if (nextMatch) {
-        const allMatchesInRound = bracketCopy.matches
-          .filter((m: PlayoffMatch) => m.round === match.round && !m.isBronzeFinal)
-          .sort((a: PlayoffMatch, b: PlayoffMatch) => a.matchIndex - b.matchIndex);
-
-        const matchIndexInRound = allMatchesInRound.findIndex((m: PlayoffMatch) => m.id === match.id);
-
-        if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
-        else nextMatch.player2Id = winnerId;
-      }
-    }
-
-    if (match.loserGoesToBronzeFinal && bracketCopy.bronzeFinalId && tournament.settings.hasBronzeFinal) {
-      const bronzeMatch = bracketCopy.matches.find((m: PlayoffMatch) => m.id === bracketCopy.bronzeFinalId);
-      if (bronzeMatch) {
-        if (bronzeMatch.player1Id === null) bronzeMatch.player1Id = loserId;
-        else if (bronzeMatch.player2Id === null) bronzeMatch.player2Id = loserId;
-      }
-    }
-
-    const playoffMatches = Array.isArray((tournament as any).playoffMatches)
-      ? JSON.parse(JSON.stringify((tournament as any).playoffMatches)) as Match[]
-      : [];
-
-    const leagueMatchId = playoffMatchToLeagueMatchId(match.id);
-    const idx = playoffMatches.findIndex(m => m.id === leagueMatchId);
-    if (idx !== -1) {
-      playoffMatches[idx] = { ...playoffMatches[idx], score1: s1, score2: s2, status: 'completed' };
-    } else {
-      const built = buildLeagueMatchFromPlayoffMatch(match);
-      if (built) playoffMatches.push({ ...built, score1: s1, score2: s2, status: 'completed' });
-    }
-
-    if (match.nextMatchId) {
-      const nextMatch = bracketCopy.matches.find(m => m.id === match.nextMatchId);
-      const builtNext = nextMatch ? buildLeagueMatchFromPlayoffMatch(nextMatch) : null;
-      if (builtNext) {
-        const nidx = playoffMatches.findIndex(m => m.id === builtNext.id);
-        if (nidx === -1) playoffMatches.push(builtNext);
-        else playoffMatches[nidx] = { ...playoffMatches[nidx], ...builtNext, score1: playoffMatches[nidx].score1 ?? null, score2: playoffMatches[nidx].score2 ?? null };
-      }
-    }
-
-    if (bracketCopy.bronzeFinalId && tournament.settings.hasBronzeFinal) {
-      const bronze = bracketCopy.matches.find(m => m.id === bracketCopy.bronzeFinalId);
-      const builtBronze = bronze ? buildLeagueMatchFromPlayoffMatch(bronze) : null;
-      if (builtBronze) {
-        const bidx = playoffMatches.findIndex(m => m.id === builtBronze.id);
-        if (bidx === -1) playoffMatches.push(builtBronze);
-        else playoffMatches[bidx] = { ...playoffMatches[bidx], ...builtBronze, score1: playoffMatches[bidx].score1 ?? null, score2: playoffMatches[bidx].score2 ?? null };
-      }
-    }
-
-    const updatedTournaments = event.tournaments.map(t =>
-      t.id === tournament.id
-        ? { ...t, playoffs: bracketCopy, playoffMatches }
-        : t
-    );
-
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setEditingMatch(null);
-    setScore1('');
-    setScore2('');
-  };
-
   if (view === 'setup') {
     if (!isOrganizer) return <p className="text-text-secondary text-center">Il tabellone dei playoff non è stato ancora generato.</p>;
 
@@ -610,7 +511,8 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
   const MatchCard = ({ match }: { match: PlayoffMatch }) => {
     const p1 = getPlayer(match.player1Id);
     const p2 = getPlayer(match.player2Id);
-    const canEdit = isOrganizer && match.player1Id && match.player2Id && match.winnerId === null;
+    const canEdit = match.player1Id && match.player2Id
+      && (isOrganizer || !!loggedInPlayerId && [match.player1Id, match.player2Id].includes(loggedInPlayerId));
 
     return (
       <div className={`bg-secondary p-2 rounded-lg w-full`}>
@@ -625,7 +527,11 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
         </div>
         {canEdit && (
           <div className="text-center mt-2">
-            <button onClick={() => { setEditingMatch(match); setScore1(match.score1?.toString() ?? ''); setScore2(match.score2?.toString() ?? ''); }} className="text-xs bg-highlight/80 hover:bg-highlight px-2 py-1 rounded-md text-white transition-colors">Risultato</button>
+            <button onClick={() => {
+              const mirror = tt.playoffMatches?.find(item => item.id === playoffMatchToLeagueMatchId(match.id))
+                ?? buildLeagueMatchFromPlayoffMatch(match);
+              if (mirror) onEditResult(mirror);
+            }} className="text-xs bg-highlight/80 hover:bg-highlight px-2 py-1 rounded-md text-white transition-colors">Risultato</button>
           </div>
         )}
       </div>
@@ -688,37 +594,6 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
         </div>
       )}
       {(!bronzeFinalId || !tournament.settings.hasBronzeFinal) && <p className="text-center text-xs text-text-secondary/50 mt-4">Finale 3° Posto disabilitata nelle impostazioni.</p>}
-
-      {isOrganizer && editingMatch && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-secondary rounded-xl shadow-2xl p-6 w-full max-w-sm border border-tertiary">
-            <h4 className="text-lg font-bold mb-4">Risultato Playoff</h4>
-            <div className="flex items-center justify-between gap-4">
-              <span className="font-semibold inline-flex items-center gap-2">
-                {getPlayer(editingMatch.player1Id) && (
-                  <img src={getPlayer(editingMatch.player1Id)!.avatar} alt={getPlayer(editingMatch.player1Id)!.name} className="w-6 h-6 rounded-full object-cover" />
-                )}
-                {getPlayer(editingMatch.player1Id)?.name}
-              </span>
-              <div className="flex gap-2">
-                <input type="number" value={score1} onChange={e => setScore1(e.target.value)} className="w-16 text-center bg-primary p-2 rounded-lg" />
-                <span>-</span>
-                <input type="number" value={score2} onChange={e => setScore2(e.target.value)} className="w-16 text-center bg-primary p-2 rounded-lg" />
-              </div>
-              <span className="font-semibold inline-flex items-center gap-2">
-                {getPlayer(editingMatch.player2Id) && (
-                  <img src={getPlayer(editingMatch.player2Id)!.avatar} alt={getPlayer(editingMatch.player2Id)!.name} className="w-6 h-6 rounded-full object-cover" />
-                )}
-                {getPlayer(editingMatch.player2Id)?.name}
-              </span>
-            </div>
-            <div className="flex justify-end gap-4 mt-6">
-              <button onClick={() => setEditingMatch(null)} className="bg-tertiary hover:bg-tertiary/80 text-text-primary font-bold py-2 px-4 rounded-lg transition-colors">Annulla</button>
-              <button onClick={handleSaveResult} className="bg-highlight hover:bg-highlight/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">Salva</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {isOrganizer && isResetModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fadeIn">
