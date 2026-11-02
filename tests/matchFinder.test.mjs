@@ -17,6 +17,7 @@ const finderPath = path.join(tempDir, 'utils/matchFinder.js');
 writeFileSync(finderPath, readFileSync(finderPath, 'utf8')
   .replaceAll("'./rankingAvailability'", "'./rankingAvailability.js'")
   .replaceAll("'./padel'", "'./padel.js'")
+  .replaceAll("'./tournamentVenues'", "'./tournamentVenues.js'")
   .replaceAll("'./tournamentAvailability'", "'./tournamentAvailability.js'"));
 const availabilityPath = path.join(tempDir, 'utils/tournamentAvailability.js');
 writeFileSync(availabilityPath, readFileSync(availabilityPath, 'utf8')
@@ -134,7 +135,7 @@ test('remaining playoff and consolation opponents are included, unrelated groups
   );
 });
 
-test('tournaments never infer availability from an absent preference or from different slot ids', () => {
+test('tournaments never infer availability from an absent preference or from nonexistent slot ids', () => {
   const t = tournament();
   for (const data of [
     availability(['a']),
@@ -162,7 +163,7 @@ const padelTournament = () => tournament({
   ],
 });
 
-test('Padel fixed teams require the very same slot for all four players and expose both opponent contacts', () => {
+test('Padel fixed teams require declarations from all four players and expose both opponent contacts', () => {
   const t = padelTournament();
   const e = event(t, { eventType: 'tournament_padel' });
   for (const id of ['a', 'b', 'c', 'd']) {
@@ -267,4 +268,127 @@ test('expiry removes common availability and opponent suggestions exactly at its
   assert.equal(getTournamentMatchSuggestions(e, t, 'a', availability(), deadline - 1).length, 1);
   assert.deepEqual(getTournamentMatchSuggestions(e, t, 'a', availability(), deadline), []);
   assert.deepEqual(getTournamentAvailabilitySlots(e, t, deadline), []);
+});
+
+const venueSlot = (id, location = 'Canottieri Salò', start = '2030-06-03T18:00:00Z', field = 'Campo 1') =>
+  slot(id, start, { location, field });
+const chosen = selections => ({
+  slotPrefMap: Object.fromEntries(Object.entries(selections).map(([id, slots]) => [id, new Set(slots)])),
+  dateUnavailMap: {},
+});
+const findWithSlots = (slots, data, overrides = {}) => {
+  const t = tournament({ timeSlots: slots, ...overrides });
+  return getTournamentMatchSuggestions(event(t, { globalTimeSlots: [] }), t, 'a', data, now);
+};
+
+test('same centre and instant are exact compatibility even with different court slot ids and legacy centre labels', () => {
+  const suggestions = findWithSlots([
+    venueSlot('court1'),
+    venueSlot('court2', 'Canottieri Salo', '2030-06-03T20:00:00+02:00', 'Campo 2'),
+  ], chosen({ a: ['court1'], b: ['court2'] }));
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].compatibility, 'exact');
+});
+
+test('same date and centre with different times is an explicit alternative with both declared times', () => {
+  const suggestions = findWithSlots([
+    venueSlot('early'), venueSlot('late', 'Canottieri Salò', '2030-06-03T20:00:00Z'),
+  ], chosen({ a: ['early'], b: ['late'] }));
+  assert.equal(suggestions[0].compatibility, 'different-time');
+  assert.match(suggestions[0].commonTimes[0], /Giocatore a: Canottieri Salò/);
+  assert.match(suggestions[0].commonTimes[0], /Giocatore b: Canottieri Salò/);
+  assert.notEqual(suggestions[0].commonTimes[0].indexOf('18:00'), -1);
+  assert.notEqual(suggestions[0].commonTimes[0].indexOf('20:00'), -1);
+});
+
+test('same date but different centres is last-tier alternative, including different times', () => {
+  for (const time of ['2030-06-03T18:00:00Z', '2030-06-03T20:00:00Z']) {
+    const suggestions = findWithSlots([venueSlot('salo'), venueSlot('paitone', 'Paitone Arena', time)],
+      chosen({ a: ['salo'], b: ['paitone'] }));
+    assert.equal(suggestions[0].compatibility, 'different-venue');
+    assert.match(suggestions[0].commonTimes[0], /Giocatore a: Canottieri Salò/);
+    assert.match(suggestions[0].commonTimes[0], /Giocatore b: Paitone Arena/);
+  }
+});
+
+test('different dates, missing declarations and excluded dates never create fallback alternatives', () => {
+  const slots = [venueSlot('salo'), venueSlot('paitone', 'Paitone Arena', '2030-06-04T18:00:00Z')];
+  assert.deepEqual(findWithSlots(slots, chosen({ a: ['salo'], b: ['paitone'] })), []);
+  assert.deepEqual(findWithSlots(slots, chosen({ a: ['salo'] })), []);
+  const data = chosen({ a: ['salo'], b: ['salo'] });
+  data.dateUnavailMap.b = new Set([getAvailabilityDateKey(slots[0].start)]);
+  assert.deepEqual(findWithSlots(slots, data), []);
+});
+
+test('venue selection gates old slot preferences and selecting both restores them without mutating data', () => {
+  const slots = [venueSlot('salo'), venueSlot('paitone', 'Paitone Arena')];
+  const data = chosen({ a: ['salo', 'paitone'], b: ['salo'] });
+  data.venueMap = { a: new Set(['paitone-arena']) };
+  assert.equal(findWithSlots(slots, data)[0].compatibility, 'different-venue');
+  data.venueMap.a = new Set(['canottieri-salo', 'paitone-arena']);
+  const before = structuredClone(data);
+  assert.equal(findWithSlots(slots, data)[0].compatibility, 'exact');
+  assert.deepEqual(data, before);
+  data.venueMap.a = new Set();
+  assert.deepEqual(findWithSlots(slots, data), []);
+});
+
+test('all suggestion categories are sorted exact, different time, different centre regardless of opponent name', () => {
+  const slots = [
+    venueSlot('salo-early'), venueSlot('salo-late', 'Canottieri Salò', '2030-06-03T20:00:00Z'),
+    venueSlot('paitone', 'Paitone Arena'),
+  ];
+  const suggestions = findWithSlots(slots, chosen({
+    a: ['salo-early'], b: ['paitone'], c: ['salo-late'], d: ['salo-early'],
+  }), { groups: [{ matches: [pending('ab', 'a', 'b'), pending('ac', 'a', 'c'), pending('ad', 'a', 'd')] }] });
+  assert.deepEqual(suggestions.map(s => [s.id, s.compatibility]), [
+    ['d', 'exact'], ['c', 'different-time'], ['b', 'different-venue'],
+  ]);
+});
+
+test('one opponent can appear at different levels for different dates, using only the best level for each date', () => {
+  const slots = [
+    venueSlot('exact'), venueSlot('later', 'Canottieri Salò', '2030-06-03T20:00:00Z'),
+    venueSlot('day2-a', 'Canottieri Salò', '2030-06-04T18:00:00Z'),
+    venueSlot('day2-b', 'Canottieri Salò', '2030-06-04T20:00:00Z'),
+    venueSlot('day3-a', 'Canottieri Salò', '2030-06-05T18:00:00Z'),
+    venueSlot('day3-b', 'Paitone Arena', '2030-06-05T18:00:00Z'),
+  ];
+  const suggestions = findWithSlots(slots, chosen({
+    a: ['exact', 'day2-a', 'day3-a'], b: ['exact', 'later', 'day2-b', 'day3-b'],
+  }));
+  assert.deepEqual(suggestions.map(s => s.compatibility), ['exact', 'different-time', 'different-venue']);
+  assert.ok(suggestions.every(s => s.commonTimes.length === 1));
+});
+
+test('expired, booked and past declarations never create alternative suggestions', () => {
+  const t = tournament({
+    timeSlots: [
+      venueSlot('salo'), { ...venueSlot('paitone', 'Paitone Arena'), expiresAt: '2020-01-01T00:00:00Z' },
+      venueSlot('past', 'Paitone Arena', '2020-06-03T20:00:00Z'), venueSlot('booked', 'Paitone Arena'),
+    ],
+    playoffMatches: [pending('busy', 'c', 'd', { status: 'scheduled', slotId: 'booked' })],
+  });
+  assert.deepEqual(getTournamentMatchSuggestions(event(t, { globalTimeSlots: [] }), t, 'a',
+    chosen({ a: ['salo'], b: ['paitone', 'past', 'booked'] }), now), []);
+});
+
+test('Padel requires real declarations from all four for alternative times and venues too', () => {
+  const t = padelTournament();
+  t.timeSlots = [
+    venueSlot('early'), venueSlot('late', 'Canottieri Salò', '2030-06-03T20:00:00Z'),
+    venueSlot('paitone', 'Paitone Arena'),
+  ];
+  const e = event(t, { globalTimeSlots: [], eventType: 'tournament_padel' });
+  const data = chosen({ a: ['early'], b: ['early'], c: ['late'], d: ['late'] });
+  assert.equal(getTournamentMatchSuggestions(e, t, 'a', data, now)[0].compatibility, 'different-time');
+  data.slotPrefMap.d = new Set(['paitone']);
+  assert.equal(getTournamentMatchSuggestions(e, t, 'a', data, now)[0].compatibility, 'different-venue');
+  for (const id of ['a', 'b', 'c', 'd']) {
+    const incomplete = structuredClone(data);
+    delete incomplete.slotPrefMap[id];
+    assert.deepEqual(getTournamentMatchSuggestions(e, t, 'a', incomplete, now), []);
+  }
+  data.dateUnavailMap.d = new Set([getAvailabilityDateKey(t.timeSlots[0].start)]);
+  assert.deepEqual(getTournamentMatchSuggestions(e, t, 'a', data, now), []);
 });

@@ -6,10 +6,13 @@ import {
   removeSlotPreference,
   setDateUnavailability,
   removeDateUnavailability,
+  setTournamentVenues,
 } from "../services/availabilityService";
 import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from "../utils/tournamentAvailability";
 import { useTournamentAvailability } from "./useTournamentAvailability";
 import { useSlotClock } from "./useSlotClock";
+import { getSlotVenueId, TOURNAMENT_VENUES, type TournamentVenueId } from "../utils/tournamentVenues";
+import { hasTournamentSlotPreference } from "../utils/matchFinder";
 
 type Props = {
   event: Event;
@@ -42,7 +45,17 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const participants = participantIds.map(pid => event.players.find(p => p.id === pid)).filter(Boolean) as Player[];
 
   const now = useSlotClock(event);
-  const futureSlots = getTournamentAvailabilitySlots(event, tournament, now);
+  const allFutureSlots = getTournamentAvailabilitySlots(event, tournament, now);
+  const availabilityScope = { eventId: event.id, tournamentId: tournament.id };
+  const availability = useTournamentAvailability(participantIds, availabilityScope);
+  const { loading, error, slotPrefMap, dateUnavailMap, venueMap } = availability;
+  const selectedVenues = loggedInPlayerId ? venueMap[loggedInPlayerId] : new Set(TOURNAMENT_VENUES.map(venue => venue.id));
+  const [savingVenues, setSavingVenues] = useState(false);
+  const [selectedDate, setSelectedDate] = useState('');
+  const futureSlots = allFutureSlots.filter(slot => {
+    const venueId = getSlotVenueId(slot);
+    return !!selectedVenues && !!venueId && selectedVenues.has(venueId);
+  });
 
   // derive unique date keys (YYYY-MM-DD) from futureSlots, sorted
   const dateKeys = useMemo(() => {
@@ -73,9 +86,25 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     return m;
   }, [futureSlots]);
 
-  const availabilityScope = { eventId: event.id, tournamentId: tournament.id };
-  const { loading, error, slotPrefMap, dateUnavailMap } = useTournamentAvailability(participantIds, availabilityScope);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const activeDate = dateKeys.includes(selectedDate) ? selectedDate : '';
+  const visibleDateKeys = activeDate ? [activeDate] : [];
+  const visibleSlots = futureSlots.filter(slot => getAvailabilityDateKey(slot.start) === activeDate);
+
+  async function saveVenues(venueIds: TournamentVenueId[]) {
+    if (!loggedInPlayerId || savingVenues) return;
+    setSavingVenues(true);
+    setSaveError(null);
+    try {
+      await setTournamentVenues(loggedInPlayerId, venueIds, availabilityScope);
+      setSelectedDate('');
+    } catch (cause) {
+      console.error("Errore salvataggio centri di gioco:", cause);
+      setSaveError("Impossibile salvare i centri di gioco. Riprova.");
+    } finally {
+      setSavingVenues(false);
+    }
+  }
 
   // Toggle slot preference: write then local snapshot will update from listener
   async function toggleMySlot(slotId: string) {
@@ -121,33 +150,69 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     return !!(dateUnavailMap[pId]?.has(dateKey));
   }
 
-  // helper: sort hh:mm strings
-  function sortHHMMArray(arr: string[]) {
-    return arr.slice().sort((a, b) => {
-      const [ah, am] = a.split(":").map(Number);
-      const [bh, bm] = b.split(":").map(Number);
-      return ah !== bh ? ah - bh : am - bm;
-    });
-  }
-
   return (
     <div className="max-w-6xl mx-auto bg-secondary rounded-xl p-6 shadow space-y-6">
       <h3 className="text-xl font-bold text-accent">Disponibilità di gioco</h3>
       <p className="text-sm text-text-secondary">
-        Seleziona “Voglio giocare” sugli slot che preferisci. Cerca partita propone solo chi ha scelto lo stesso slot:
-        non aver escluso una data non equivale ad aver dichiarato disponibilità.
+        Scegli prima il centro o entrambi, poi la data e gli orari in cui vuoi giocare.
+        Cerca partita mostra prima le coincidenze di centro, data e ora, poi le alternative da concordare.
+        Non aver escluso una data non equivale ad aver dichiarato disponibilità.
       </p>
       {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
-
+      <fieldset className="space-y-3">
+        <legend className="font-bold mb-3">1. Dove vuoi giocare?</legend>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[...TOURNAMENT_VENUES.map(venue => ({ name: venue.name, ids: [venue.id] })), {
+            name: 'Entrambi i centri', ids: TOURNAMENT_VENUES.map(venue => venue.id),
+          }].map(choice => {
+            const selected = selectedVenues?.size === choice.ids.length && choice.ids.every(id => selectedVenues.has(id));
+            return (
+              <button
+                key={choice.name}
+                type="button"
+                aria-pressed={!!selected}
+                disabled={!loggedInPlayerId || savingVenues}
+                onClick={() => saveVenues(choice.ids)}
+                className={`p-4 rounded-lg border-2 font-semibold disabled:opacity-50 ${selected ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary bg-primary'}`}
+              >
+                {choice.name}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-sm text-text-secondary">
+          La scelta viene salvata. Solo gli orari dei centri selezionati contano per i suggerimenti.
+          Le preferenze precedenti degli altri centri restano archiviate e tornano attive se li selezioni di nuovo.
+        </p>
+        {savingVenues && <p role="status">Salvataggio centri…</p>}
+      </fieldset>
+      {selectedVenues && (
+        <div className="space-y-2">
+          <label htmlFor="availability-date" className="font-bold block">2. Scegli la data di gioco, poi gli orari</label>
+          <select
+            id="availability-date"
+            value={activeDate}
+            onChange={e => setSelectedDate(e.target.value)}
+            className="bg-primary border border-tertiary text-text-primary rounded-lg px-3 py-2"
+          >
+            <option value="">Seleziona una data</option>
+            {dateKeys.map(date => <option key={date} value={date}>{formatDisplayDateKey(date)}</option>)}
+          </select>
+          {dateKeys.length === 0 && <p className="text-text-secondary">Nessuna data con slot futuri liberi per i centri scelti.</p>}
+          <p className="text-sm text-text-secondary">Puoi indicare più orari e cambiare data per aggiungere altre disponibilità: ogni scelta viene salvata.</p>
+        </div>
+      )}
+      {!selectedVenues && <p className="text-text-secondary">Seleziona un centro o entrambi per vedere le date disponibili.</p>}
+      {activeDate && (
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Left: per-date toggles */}
         <div className="lg:col-span-1 bg-primary p-4 rounded-lg border border-tertiary space-y-4">
           <h4 className="font-semibold">Non disponibile per date</h4>
-          {dateKeys.length === 0 ? (
+          {visibleDateKeys.length === 0 ? (
             <div className="text-text-secondary text-sm">Nessuna data futura (gli slot futuri non sono presenti).</div>
           ) : (
             <div className="space-y-2 max-h-[52vh] overflow-auto pr-2">
-              {dateKeys.map(dk => {
+              {visibleDateKeys.map(dk => {
                 const countUnavailable = participants.filter(p => isParticipantUnavailableOn(p.id, dk)).length;
                 const myUnavail = loggedInPlayerId ? isParticipantUnavailableOn(loggedInPlayerId, dk) : false;
                 return (
@@ -179,7 +244,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
         <div className="lg:col-span-3">
           <h4 className="font-semibold mb-3">Disponibilità partecipanti per data</h4>
 
-          {dateKeys.length === 0 ? (
+          {visibleDateKeys.length === 0 ? (
             <div className="bg-primary p-4 rounded-lg border border-tertiary">Nessuna data futura disponibile.</div>
           ) : (
             <div className="overflow-auto bg-primary p-3 rounded-lg border border-tertiary">
@@ -187,7 +252,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                 <thead>
                   <tr>
                     <th className="text-left pr-4 pb-2 font-semibold">Giocatore</th>
-                    {dateKeys.map(dk => (
+                    {visibleDateKeys.map(dk => (
                       <th key={dk} className="text-left px-3 pb-2 font-semibold">{formatDisplayDateKey(dk)}</th>
                     ))}
                   </tr>
@@ -201,17 +266,13 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                           <span>{p.name}</span>
                         </div>
                       </td>
-                      {dateKeys.map(dk => {
+                      {visibleDateKeys.map(dk => {
                         const unavailable = isParticipantUnavailableOn(p.id, dk);
                         const slotsForDate = dateSlotsMap[dk] ?? [];
-                        const selectedSlotIds = Array.from(slotPrefMap[p.id] ?? new Set<string>());
-                        const selectedSlotsOnDate = slotsForDate.filter(s => {
-                          return selectedSlotIds.includes(s.id);
-                        });
+                        const selectedSlotsOnDate = slotsForDate.filter(slot => hasTournamentSlotPreference(availability, p.id, slot));
 
                         // Create unique hh:mm list so same start times across fields are shown only once
-                        const uniqueTimes = Array.from(new Set(selectedSlotsOnDate.map(s => formatHHMMFromIso(s.start))));
-                        const sortedTimes = sortHHMMArray(uniqueTimes.filter(Boolean));
+                        const sortedTimes = [...new Set(selectedSlotsOnDate.map(slot => `${slot.location} · ${formatHHMMFromIso(slot.start)}`))];
 
                         return (
                           <td key={dk} className="px-3 py-2 align-top">
@@ -245,15 +306,15 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
           {/* Slots list (below table) - SHOW FULL DETAILS */}
           <div className="mt-6">
             <h4 className="font-semibold mb-3">Slot futuri creati dall'amministratore</h4>
-            {futureSlots.length === 0 ? (
-              <div className="bg-primary p-4 rounded-lg border border-tertiary">Nessuno slot futuro disponibile creato dall'amministratore per questo torneo.</div>
+            {visibleSlots.length === 0 ? (
+              <div className="bg-primary p-4 rounded-lg border border-tertiary">Nessuno slot futuro disponibile creato dall'amministratore per questa data e questi centri.</div>
             ) : (
               <div className="space-y-4">
-                {futureSlots.map(slot => {
+                {visibleSlots.map(slot => {
                   const slotId = slot.id;
                   const slotDateKey = getAvailabilityDateKey(slot.start);
                   const myDateUnavail = loggedInPlayerId ? isParticipantUnavailableOn(loggedInPlayerId, slotDateKey) : false;
-                  const interested = participants.filter(p => slotPrefMap[p.id]?.has(slotId)).map(p => p.name);
+                  const interested = participants.filter(p => hasTournamentSlotPreference(availability, p.id, slot)).map(p => p.name);
                   const myPref = loggedInPlayerId ? (slotPrefMap[loggedInPlayerId]?.has(slotId) ?? false) : false;
                   const startIso = slot.start;
                   const hhmm = formatHHMMFromIso(startIso); // e.g. "08:00"
@@ -294,6 +355,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

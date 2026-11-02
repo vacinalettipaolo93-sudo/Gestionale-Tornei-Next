@@ -12,13 +12,14 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { TOURNAMENT_VENUES, type TournamentVenueId } from "../utils/tournamentVenues";
 
 /**
  * Servizio disponibilità
  *
  * Collections:
  * - availabilities (legacy per data+slot)
- * - availability_settings (global on/off per player)
+ * - availability_settings (global on/off per player and scoped tournament venue choices)
  * - slot_preferences (preference per slot)
  * - date_unavailabilities (per-player per-date non disponibilità)
  */
@@ -67,6 +68,17 @@ export interface DateUnavailability {
 export interface TournamentAvailabilityScope {
   eventId: string;
   tournamentId: string;
+}
+
+export async function setTournamentVenues(playerId: string, venueIds: TournamentVenueId[], scope: TournamentAvailabilityScope): Promise<void> {
+  if (!playerId || !scope.eventId || !scope.tournamentId || venueIds.length === 0
+    || venueIds.some(id => !TOURNAMENT_VENUES.some(venue => venue.id === id))) {
+    throw new Error('Seleziona almeno un centro di gioco valido.');
+  }
+  const ref = doc(db, 'availability_settings', `${scope.eventId}_${scope.tournamentId}_${playerId}`);
+  await setDoc(ref, {
+    playerId, ...scope, venueIds: [...new Set(venueIds)], updatedAt: serverTimestamp(),
+  }, { merge: true });
 }
 
 // --- collections ---
@@ -126,7 +138,10 @@ export async function getGlobalAvailabilitiesForPlayers(playerIds: string[]): Pr
     const c = collection(db, GLOBAL_COL);
     const q = query(c, where("playerId", "in", chunk));
     const snap = await getDocs(q);
-    snap.docs.forEach(d => results.push({ id: d.id, ...(d.data() as GlobalAvailability) }));
+    snap.docs.forEach(d => {
+      const record = d.data();
+      if (!record.eventId && !record.tournamentId) results.push({ id: d.id, ...(record as GlobalAvailability) });
+    });
   }
   return results;
 }
