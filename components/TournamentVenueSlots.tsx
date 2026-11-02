@@ -1,17 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { type Event } from '../types';
 import { saveTournamentSlotAction } from '../services/tournamentBookingService';
-import { getEventSlots, isEventSlotBooked } from '../utils/tournamentAvailability';
+import { getEventSlots, isEventSlotBooked, isSlotExpired } from '../utils/tournamentAvailability';
+import { useSlotClock } from './useSlotClock';
 import { formatTournamentSlotDate, formatTournamentSlotTime, getSlotVenueId, TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 
 const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId }> = ({ event, venueId }) => {
   const [start, setStart] = useState('');
   const [field, setField] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const venue = TOURNAMENT_VENUES.find(item => item.id === venueId)!;
-  const slots = getEventSlots(event).filter(slot => getSlotVenueId(slot) === venueId);
+  const now = useSlotClock(event);
+  const slots = getEventSlots(event).filter(slot => getSlotVenueId(slot) === venueId
+    && (!isSlotExpired(slot, now) || isEventSlotBooked(event, slot)));
 
   useEffect(() => {
     setError(null);
@@ -27,7 +31,7 @@ const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId 
     try {
       await saveTournamentSlotAction(event.id, undefined, {
         type: 'add',
-        slot: { id: `slot_${crypto.randomUUID()}`, start, field, location: venue.name, venueId },
+        slot: { id: `slot_${crypto.randomUUID()}`, start, field, location: venue.name, venueId, ...(expiresAt ? { expiresAt } : {}) },
       }, { isOrganizer: true });
       setSuccess(`Slot aggiunto a ${event.name} — ${venue.name}, disponibile in tutti i tornei dell’evento.`);
     } catch (cause) {
@@ -63,6 +67,15 @@ const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId 
       {error && <p role="alert" className="text-red-400">{error}</p>}
       {success && <p role="status" className="text-green-400">{success}</p>}
       <form onSubmit={addSlot} className="bg-primary p-4 rounded-lg space-y-4">
+        <div>
+          <label htmlFor="venue-slot-expiry" className="block text-sm font-semibold mb-1">Slot disponibili fino a</label>
+          <input id="venue-slot-expiry" type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} disabled={saving} className="w-full bg-secondary border border-tertiary p-3 rounded-lg text-text-primary" />
+          <p className="text-sm text-text-secondary mt-2">
+            La scadenza si applica solo ai nuovi slot inseriti con questa data e ora, non a quelli già presenti.
+            Alla scadenza gli slot rimasti liberi scompaiono e non sono più prenotabili; quelli prenotati restano.
+            Lascia vuoto per inserire slot senza scadenza.
+          </p>
+        </div>
         <h3 className="font-bold">Aggiungi slot libero — {event.name}</h3>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -83,12 +96,13 @@ const TournamentVenueSlots: React.FC<{ event: Event; venueId: TournamentVenueId 
         {slots.length === 0 && <p className="text-text-secondary">Nessuno slot inserito per questo centro nell’evento.</p>}
         {slots.map(slot => {
           const booked = isEventSlotBooked(event, slot);
-          const past = Date.parse(slot.start) <= Date.now();
+          const past = Date.parse(slot.start) <= now;
           return (
             <div key={slot.id} className="bg-primary border border-tertiary rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="font-semibold">{formatTournamentSlotDate(slot.start)}</p>
                 <p>{formatTournamentSlotTime(slot.start)} · {slot.field || 'Campo non specificato'}</p>
+                {slot.expiresAt && <p className="text-sm text-text-secondary">Scadenza disponibilità: {Number.isFinite(Date.parse(slot.expiresAt)) ? `${formatTournamentSlotDate(slot.expiresAt)} · ${formatTournamentSlotTime(slot.expiresAt)}` : 'Data non valida: verificare lo slot'}</p>}
                 <p className={`text-sm ${booked ? 'text-highlight' : 'text-text-secondary'}`}>{booked ? 'Prenotato' : past ? 'Trascorso' : 'Libero'}</p>
               </div>
               <button

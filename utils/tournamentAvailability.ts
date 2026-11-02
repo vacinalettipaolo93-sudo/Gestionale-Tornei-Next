@@ -19,7 +19,14 @@ export function normalizeTournamentSlot(value: unknown): TimeSlot | null {
   const field = String(slot.field ?? '');
   const id = String(slot.id ?? slot.slotId ?? slot.timeSlotId ?? `${rawStart}|${location}|${field}`);
   const venueId = slot.venueId === 'canottieri-salo' || slot.venueId === 'paitone-arena' ? slot.venueId : undefined;
-  return { id, start: date.toISOString(), location, field, ...(venueId ? { venueId } : {}) };
+  const expiresAt = slot.expiresAt == null ? undefined : String(slot.expiresAt);
+  return { id, start: date.toISOString(), location, field, ...(venueId ? { venueId } : {}), ...(expiresAt !== undefined ? { expiresAt } : {}) };
+}
+
+export function isSlotExpired(slot: TimeSlot, now = Date.now()): boolean {
+  if (slot.expiresAt === undefined) return false;
+  const deadline = Date.parse(slot.expiresAt);
+  return !Number.isFinite(deadline) || deadline <= now;
 }
 
 export function getAvailabilityDateKey(start: string): string {
@@ -94,7 +101,29 @@ export function getTournamentAvailabilitySlots(
   event: Event, tournament: Tournament, now = Date.now(), excludingMatchId?: string,
 ): TimeSlot[] {
   return getEventSlots(event).filter(slot =>
-    Date.parse(slot.start) > now && !isEventSlotBooked(event, slot,
+    Date.parse(slot.start) > now
+    && (!isSlotExpired(slot, now) || !!excludingMatchId && getTournamentMatches(tournament).some(
+      match => match.id === excludingMatchId && match.slotId === slot.id
+    ))
+    && !isEventSlotBooked(event, slot,
       excludingMatchId ? { tournamentId: tournament.id, matchId: excludingMatchId } : undefined)
   );
+}
+
+export function getExpiredFreeSlotIds(event: Event, now = Date.now()): Set<string> {
+  return new Set(getEventSlots(event)
+    .filter(slot => isSlotExpired(slot, now) && !isEventSlotBooked(event, slot))
+    .map(slot => slot.id));
+}
+
+export function pruneExpiredFreeSlots(event: Event, now = Date.now()): Pick<Event, 'tournaments' | 'globalTimeSlots'> {
+  const expiredIds = getExpiredFreeSlotIds(event, now);
+  const keep = (raw: TimeSlot) => !expiredIds.has(normalizeTournamentSlot(raw)?.id ?? '');
+  return {
+    globalTimeSlots: (event.globalTimeSlots ?? []).filter(keep),
+    tournaments: event.tournaments.map(tournament => ({
+      ...tournament,
+      ...(tournament.timeSlots ? { timeSlots: tournament.timeSlots.filter(keep) } : {}),
+    })),
+  };
 }

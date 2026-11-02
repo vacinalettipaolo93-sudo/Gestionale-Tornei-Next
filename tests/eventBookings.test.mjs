@@ -1,6 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { build } from 'esbuild';
+import { createRequire } from 'node:module';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,13 +11,24 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'event-bookings-'));
 after(() => rmSync(tempDir, { recursive: true }));
-execFileSync('node_modules/.bin/esbuild', [
-  'utils/eventBookings.ts', 'components/BookedVenueSlots.tsx',
-  '--bundle', '--platform=node', '--format=esm', '--outbase=.',
-  '--out-extension:.js=.mjs', `--outdir=${tempDir}`,
-], { stdio: 'pipe' });
+await build({
+  entryPoints: ['utils/eventBookings.ts', 'components/BookedVenueSlots.tsx', 'components/TournamentVenueSlots.tsx'],
+  bundle: true, platform: 'node', format: 'esm', outbase: '.',
+  outExtension: { '.js': '.mjs' }, outdir: tempDir,
+  plugins: [{
+    name: 'test-dependencies',
+    setup(plugin) {
+      plugin.onResolve({ filter: /^react(\/.*)?$/ }, args => ({ path: createRequire(import.meta.url).resolve(args.path), external: true }));
+      plugin.onResolve({ filter: /services\/tournamentBookingService$/ }, () => ({ path: 'booking-service', namespace: 'test' }));
+      plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
+        contents: 'export async function saveTournamentSlotAction() { throw new Error("Unexpected persistence during render"); }',
+      }));
+    },
+  }],
+});
 const { getEventBookings } = await import(pathToFileURL(path.join(tempDir, 'utils/eventBookings.mjs')).href);
 const { default: BookedVenueSlots } = await import(pathToFileURL(path.join(tempDir, 'components/BookedVenueSlots.mjs')).href);
+const { default: TournamentVenueSlots } = await import(pathToFileURL(path.join(tempDir, 'components/TournamentVenueSlots.mjs')).href);
 const slot = (id = 's1', overrides = {}) => ({
   id, start: '2030-06-03T18:00:00Z', location: 'Canottieri Salò', venueId: 'canottieri-salo', field: 'Campo 1', ...overrides,
 });
@@ -117,4 +129,27 @@ test('unrecognized centres and missing dates stay visible with explicit warnings
   assert.match(html, /Campo non specificato/);
   assert.ok(!html.includes('Invalid Date'));
   assert.equal((render(event({ tournaments: [] })).match(/Nessuno slot prenotato per questo centro/g) || []).length, 2);
+});
+
+test('scheduled reservations offer edit/cancel while completed reservations remain read-only', () => {
+  const html = render(event());
+  assert.match(html, /Modifica prenotazione/);
+  assert.match(html, /Cancella prenotazione/);
+  const completed = event();
+  completed.tournaments[0].groups[0].matches[0].status = 'completed';
+  assert.ok(!render(completed).includes('Cancella prenotazione'));
+  assert.ok(!render(completed).includes('Modifica prenotazione'));
+});
+
+test('admin slot form places expiry above insertion and hides expired free slots without hiding booked ones', () => {
+  const e = event({ globalTimeSlots: [
+    slot('expired-free', { expiresAt: '2020-01-01T00:00:00Z', field: 'Campo libero scaduto' }),
+    slot('s1', { expiresAt: '2020-01-01T00:00:00Z', field: 'Campo prenotato' }),
+    slot('no-expiry', { field: 'Campo senza scadenza' }),
+  ] });
+  const html = renderToStaticMarkup(React.createElement(TournamentVenueSlots, { event: e, venueId: 'canottieri-salo' }));
+  assert.ok(html.indexOf('Slot disponibili fino a') < html.indexOf('Aggiungi slot libero'));
+  assert.ok(!html.includes('Campo libero scaduto'));
+  assert.match(html, /Campo prenotato/);
+  assert.match(html, /Campo senza scadenza/);
 });

@@ -1,11 +1,12 @@
 import { type Event, type Match, type TimeSlot, type Tournament } from '../types';
 import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from './padel';
-import { getEventSlots, getTournamentMatches, isSameCourtTime, isEventSlotBooked, normalizeTournamentSlot } from './tournamentAvailability';
+import { getEventSlots, getTournamentMatches, isSameCourtTime, isEventSlotBooked, isSlotExpired, normalizeTournamentSlot, pruneExpiredFreeSlots } from './tournamentAvailability';
 import { TOURNAMENT_VENUES } from './tournamentVenues';
 
 export type TournamentSlotAction =
   | { type: 'add'; slot: TimeSlot }
   | { type: 'delete'; slotId: string }
+  | { type: 'purge-expired' }
   | { type: 'book' | 'reschedule'; matchId: string; slotId: string }
   | { type: 'cancel'; matchId: string };
 
@@ -19,6 +20,20 @@ const isCompleted = (match: Match) => match.status === 'completed' || (match.sco
 export function applyTournamentSlotAction(
   event: Event, tournamentId: string | undefined, action: TournamentSlotAction, actor: BookingActor, now = Date.now(),
 ): Pick<Event, 'tournaments' | 'globalTimeSlots'> {
+  const cleanedEvent = { ...event, ...pruneExpiredFreeSlots(event, now) };
+  if (action.type === 'purge-expired') {
+    if (!actor.isOrganizer && (!actor.playerId || !event.players.some(player => player.id === actor.playerId))) {
+      throw new Error('Solo l’amministratore o un giocatore dell’evento può eliminare gli slot scaduti.');
+    }
+    return pruneExpiredFreeSlots(event, now);
+  }
+  const update = applyAction(cleanedEvent, tournamentId, action, actor, now);
+  return pruneExpiredFreeSlots({ ...cleanedEvent, ...update }, now);
+}
+
+function applyAction(
+  event: Event, tournamentId: string | undefined, action: Exclude<TournamentSlotAction, { type: 'purge-expired' }>, actor: BookingActor, now: number,
+): Pick<Event, 'tournaments' | 'globalTimeSlots'> {
   const tournament = event.tournaments.find(item => item.id === tournamentId);
   let updated: Tournament;
   if (action.type === 'add' || action.type === 'delete') {
@@ -28,6 +43,10 @@ export function applyTournamentSlotAction(
       const venue = TOURNAMENT_VENUES.find(item => item.id === slot?.venueId);
       if (!slot || !slot.id.trim() || !venue || !slot.field.trim() || Date.parse(slot.start) <= now) {
         throw new Error('Inserisci una data futura, un orario, un centro e un campo validi.');
+      }
+      if (slot.expiresAt !== undefined) {
+        if (isSlotExpired(slot, now)) throw new Error('Inserisci una scadenza futura valida per gli slot.');
+        slot.expiresAt = new Date(slot.expiresAt).toISOString();
       }
       if (getEventSlots(event).some(item => item.id === slot.id || isSameCourtTime(item, slot))) {
         throw new Error('Questo campo è già presente alla stessa data e ora in questo evento.');
@@ -71,7 +90,9 @@ export function applyTournamentSlotAction(
       updatedMatch = { ...rest, status: 'pending' };
     } else {
       const slot = getEventSlots(event).find(item => item.id === action.slotId);
-      if (!slot || Date.parse(slot.start) <= now) throw new Error('Lo slot non è più disponibile in questo evento.');
+      if (!slot || Date.parse(slot.start) <= now || (isSlotExpired(slot, now) && !(action.type === 'reschedule' && match.slotId === slot.id))) {
+        throw new Error('Lo slot non è più disponibile in questo evento.');
+      }
       if (isEventSlotBooked(event, slot, { tournamentId: tournament.id, matchId: match.id })) {
         throw new Error('Slot appena prenotato da un’altra partita. Seleziona un altro orario o campo.');
       }

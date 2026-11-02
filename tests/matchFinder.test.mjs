@@ -258,3 +258,13 @@ test('availability edits and fixture completion immediately change recomputed su
   t.groups[0].matches[0].status = 'completed';
   assert.equal(getTournamentMatchSuggestions(e, t, 'a', data, now).length, 0);
 });
+
+test('expiry removes common availability and opponent suggestions exactly at its deadline', () => {
+  const expiresAt = '2030-02-01T12:00:00Z';
+  const deadline = Date.parse(expiresAt);
+  const t = tournament({ timeSlots: [slot('s1', '2030-06-03T18:00:00Z', { expiresAt })] });
+  const e = event(t, { globalTimeSlots: [] });
+  assert.equal(getTournamentMatchSuggestions(e, t, 'a', availability(), deadline - 1).length, 1);
+  assert.deepEqual(getTournamentMatchSuggestions(e, t, 'a', availability(), deadline), []);
+  assert.deepEqual(getTournamentAvailabilitySlots(e, t, deadline), []);
+});

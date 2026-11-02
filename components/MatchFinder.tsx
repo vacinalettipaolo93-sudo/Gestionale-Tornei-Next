@@ -2,6 +2,7 @@ import React from 'react';
 import { type Event, type Player, type SummerPlayerAvailability, type Tournament } from '../types';
 import { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability, type MatchSuggestion } from '../utils/matchFinder';
 import { useTournamentAvailability } from './useTournamentAvailability';
+import { useSlotClock } from './useSlotClock';
 import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
 
 interface MatchFinderProps {
@@ -106,16 +107,17 @@ export function TournamentMatchFinder({
     eventId: event.id, tournamentId: tournament.id,
   });
   const padel = event.eventType === 'tournament_padel';
+  const now = useSlotClock(event);
   return (
     <MatchFinder
       {...actions}
       loading={availability.loading}
       error={availability.error}
-      hasAvailability={getTournamentAvailabilitySlots(event, tournament).some(slot =>
+      hasAvailability={getTournamentAvailabilitySlots(event, tournament, now).some(slot =>
         availability.slotPrefMap[currentPlayerId]?.has(slot.id)
         && !availability.dateUnavailMap[currentPlayerId]?.has(getAvailabilityDateKey(slot.start))
       )}
-      suggestions={getTournamentMatchSuggestions(event, tournament, currentPlayerId, availability)}
+      suggestions={getTournamentMatchSuggestions(event, tournament, currentPlayerId, availability, now)}
       description={padel
         ? 'Solo squadre avversarie degli incontri ancora da giocare, con uno slot futuro libero scelto da tutti e quattro i giocatori. Le date segnate come non disponibili sono escluse.'
         : 'Solo avversari degli incontri ancora da giocare, con uno slot futuro libero scelto da entrambi. Le date segnate come non disponibili sono escluse.'}

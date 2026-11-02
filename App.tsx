@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { type Event, type Tournament, type User, type Player, type SummerRankingData } from './types';
 import EventView from './components/EventView';
+import ExpiredSlotCleanup from './components/ExpiredSlotCleanup';
 import TournamentView from './components/TournamentView';
 import Login from './components/Login';
 import EditProfileModal from './components/EditProfileModal';
@@ -900,6 +901,9 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-primary text-text-primary p-4 sm:p-6 lg:p-8">
+      {events.filter(event => isOrganizer || event.players.some(player => player.id === loggedInPlayerId)).map(event => (
+        <ExpiredSlotCleanup key={event.id} event={event} isOrganizer={isOrganizer} playerId={loggedInPlayerId} />
+      ))}
       <header className="mb-8">
         <div className="max-w-7xl mx-auto flex justify-between items-center gap-4">
           <div className="flex items-center gap-4 min-w-0">
