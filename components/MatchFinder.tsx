@@ -1,9 +1,9 @@
 import React from 'react';
 import { type Event, type Player, type SummerPlayerAvailability, type Tournament } from '../types';
-import { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability, type MatchSuggestion } from '../utils/matchFinder';
+import { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability, hasTournamentSlotPreference, type MatchSuggestion } from '../utils/matchFinder';
 import { useTournamentAvailability } from './useTournamentAvailability';
 import { useSlotClock } from './useSlotClock';
-import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
+import { getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
 
 interface MatchFinderProps {
   suggestions: MatchSuggestion[];
@@ -43,11 +43,20 @@ const MatchFinder: React.FC<MatchFinderProps> = ({
     ) : (
       <div className="grid gap-3 md:grid-cols-2">
         {suggestions.map(suggestion => (
-          <div key={suggestion.id} className="bg-primary rounded-lg border border-tertiary p-4 space-y-3">
+          <div key={`${suggestion.id}:${suggestion.compatibility ?? 'ranking'}`} className="bg-primary rounded-lg border border-tertiary p-4 space-y-3">
             <h4 className="font-semibold text-text-primary break-words">{suggestion.name}</h4>
+            {suggestion.compatibility && (
+              <p className={`text-sm font-bold ${suggestion.compatibility === 'exact' ? 'text-green-400' : 'text-highlight'}`}>
+                {suggestion.compatibility === 'exact'
+                  ? 'Compatibilità esatta: stesso centro, data e ora'
+                  : suggestion.compatibility === 'different-time'
+                    ? 'Da concordare: stessa data e centro, orari diversi'
+                    : 'Da concordare: stessa data, centri diversi (anche gli orari possono differire)'}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {suggestion.commonTimes.map(time => (
-                <span key={time} className="text-sm rounded bg-green-500/10 text-green-400 px-2 py-1">{time}</span>
+                <span key={time} className={`text-sm rounded px-2 py-1 ${suggestion.compatibility && suggestion.compatibility !== 'exact' ? 'bg-primary text-highlight border border-tertiary' : 'bg-green-500/10 text-green-400'}`}>{time}</span>
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -114,13 +123,12 @@ export function TournamentMatchFinder({
       loading={availability.loading}
       error={availability.error}
       hasAvailability={getTournamentAvailabilitySlots(event, tournament, now).some(slot =>
-        availability.slotPrefMap[currentPlayerId]?.has(slot.id)
-        && !availability.dateUnavailMap[currentPlayerId]?.has(getAvailabilityDateKey(slot.start))
+        hasTournamentSlotPreference(availability, currentPlayerId, slot)
       )}
       suggestions={getTournamentMatchSuggestions(event, tournament, currentPlayerId, availability, now)}
       description={padel
-        ? 'Solo squadre avversarie degli incontri ancora da giocare, con uno slot futuro libero scelto da tutti e quattro i giocatori. Le date segnate come non disponibili sono escluse.'
-        : 'Solo avversari degli incontri ancora da giocare, con uno slot futuro libero scelto da entrambi. Le date segnate come non disponibili sono escluse.'}
+        ? 'Solo squadre avversarie degli incontri ancora da giocare, con disponibilità dichiarate da tutti e quattro. Prima stesso centro, data e ora; poi stessa data e centro con orari diversi; infine stessa data con centri diversi. Le alternative richiedono un accordo.'
+        : 'Solo avversari degli incontri ancora da giocare. Prima stesso centro, data e ora; poi stessa data e centro con orari diversi; infine stessa data con centri diversi. Le alternative richiedono un accordo.'}
     />
   );
 }
