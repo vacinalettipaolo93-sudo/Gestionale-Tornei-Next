@@ -1,6 +1,6 @@
 import { type Event, type Match, type TimeSlot, type Tournament } from '../types';
 import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from './padel';
-import { getTournamentMatches, getTournamentSlots, isSameCourtTime, isTournamentSlotBooked, normalizeTournamentSlot } from './tournamentAvailability';
+import { getEventSlots, getTournamentMatches, isSameCourtTime, isEventSlotBooked, normalizeTournamentSlot } from './tournamentAvailability';
 import { TOURNAMENT_VENUES } from './tournamentVenues';
 
 export type TournamentSlotAction =
@@ -17,10 +17,9 @@ export interface BookingActor {
 const isCompleted = (match: Match) => match.status === 'completed' || (match.score1 != null && match.score2 != null);
 
 export function applyTournamentSlotAction(
-  event: Event, tournamentId: string, action: TournamentSlotAction, actor: BookingActor, now = Date.now(),
-): Tournament[] {
+  event: Event, tournamentId: string | undefined, action: TournamentSlotAction, actor: BookingActor, now = Date.now(),
+): Pick<Event, 'tournaments' | 'globalTimeSlots'> {
   const tournament = event.tournaments.find(item => item.id === tournamentId);
-  if (!tournament) throw new Error('Torneo non trovato. Riapri la pagina.');
   let updated: Tournament;
   if (action.type === 'add' || action.type === 'delete') {
     if (!actor.isOrganizer) throw new Error('Solo l’amministratore può gestire gli slot.');
@@ -30,17 +29,25 @@ export function applyTournamentSlotAction(
       if (!slot || !slot.id.trim() || !venue || !slot.field.trim() || Date.parse(slot.start) <= now) {
         throw new Error('Inserisci una data futura, un orario, un centro e un campo validi.');
       }
-      if (getTournamentSlots(tournament).some(item => item.id === slot.id || isSameCourtTime(item, slot))) {
-        throw new Error('Questo campo è già presente alla stessa data e ora in questo torneo.');
+      if (getEventSlots(event).some(item => item.id === slot.id || isSameCourtTime(item, slot))) {
+        throw new Error('Questo campo è già presente alla stessa data e ora in questo evento.');
       }
-      updated = { ...tournament, timeSlots: [...(tournament.timeSlots ?? []), { ...slot, location: venue.name, field: slot.field.trim() }] };
+      return {
+        tournaments: event.tournaments,
+        globalTimeSlots: [...(event.globalTimeSlots ?? []), { ...slot, location: venue.name, field: slot.field.trim() }],
+      };
     } else {
-      const slot = getTournamentSlots(tournament).find(item => item.id === action.slotId);
+      const slot = getEventSlots(event).find(item => item.id === action.slotId);
       if (!slot) throw new Error('Slot non trovato.');
-      if (isTournamentSlotBooked(tournament, slot)) throw new Error('Non puoi eliminare uno slot prenotato. Annulla prima la prenotazione della partita.');
-      updated = { ...tournament, timeSlots: (tournament.timeSlots ?? []).filter(item => normalizeTournamentSlot(item)?.id !== action.slotId) };
+      if (isEventSlotBooked(event, slot)) throw new Error('Non puoi eliminare uno slot prenotato. Annulla prima la prenotazione della partita.');
+      const keep = (item: TimeSlot) => normalizeTournamentSlot(item)?.id !== action.slotId;
+      return {
+        globalTimeSlots: (event.globalTimeSlots ?? []).filter(keep),
+        tournaments: event.tournaments.map(item => ({ ...item, timeSlots: (item.timeSlots ?? []).filter(keep) })),
+      };
     }
   } else {
+    if (!tournament) throw new Error('Torneo non trovato. Riapri la pagina.');
     const match = getTournamentMatches(tournament).find(item => item.id === action.matchId);
     if (!match) throw new Error('Partita non trovata.');
     const competitorId = isPadelEvent(event)
@@ -63,9 +70,9 @@ export function applyTournamentSlotAction(
       const { slotId, scheduledTime, location, field, ...rest } = match;
       updatedMatch = { ...rest, status: 'pending' };
     } else {
-      const slot = getTournamentSlots(tournament).find(item => item.id === action.slotId);
-      if (!slot || Date.parse(slot.start) <= now) throw new Error('Lo slot non è più disponibile in questo torneo.');
-      if (isTournamentSlotBooked(tournament, slot, match.id)) {
+      const slot = getEventSlots(event).find(item => item.id === action.slotId);
+      if (!slot || Date.parse(slot.start) <= now) throw new Error('Lo slot non è più disponibile in questo evento.');
+      if (isEventSlotBooked(event, slot, { tournamentId: tournament.id, matchId: match.id })) {
         throw new Error('Slot appena prenotato da un’altra partita. Seleziona un altro orario o campo.');
       }
       updatedMatch = {
@@ -81,5 +88,8 @@ export function applyTournamentSlotAction(
       ...(tournament.consolationMatches ? { consolationMatches: replace(tournament.consolationMatches) } : {}),
     };
   }
-  return event.tournaments.map(item => item.id === tournamentId ? updated : item);
+  return {
+    tournaments: event.tournaments.map(item => item.id === tournamentId ? updated : item),
+    globalTimeSlots: event.globalTimeSlots ?? [],
+  };
 }

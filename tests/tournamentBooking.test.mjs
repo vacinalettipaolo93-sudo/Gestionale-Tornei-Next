@@ -20,7 +20,7 @@ for (const file of readdirSync(path.join(tempDir, 'utils'))) {
 }
 const bookingUrl = pathToFileURL(path.join(tempDir, 'utils/tournamentBooking.js')).href;
 const { applyTournamentSlotAction } = await import(bookingUrl);
-const { getTournamentAvailabilitySlots, isTournamentSlotBooked } =
+const { getTournamentAvailabilitySlots, isTournamentSlotBooked, getEventSlots, isEventSlotBooked } =
   await import(pathToFileURL(path.join(tempDir, 'utils/tournamentAvailability.js')).href);
 const { getSlotVenueId } =
   await import(pathToFileURL(path.join(tempDir, 'utils/tournamentVenues.js')).href);
@@ -43,11 +43,11 @@ const tournament = (id = 't1', overrides = {}) => ({
 const event = (overrides = {}) => ({
   id: 'event', name: 'Evento', eventType: 'tournament_singolare',
   players: ['a', 'b', 'c', 'd'].map(id => ({ id, name: id, status: 'confirmed' })),
-  tournaments: [tournament(), tournament('t2')], globalTimeSlots: [slot('global-only')],
+  tournaments: [tournament(), tournament('t2')], globalTimeSlots: [],
   ...overrides,
 });
 const apply = (e, action, actor = participant, tournamentId = 't1') =>
-  ({ ...e, tournaments: applyTournamentSlotAction(e, tournamentId, action, actor, now) });
+  ({ ...e, ...applyTournamentSlotAction(e, tournamentId, action, actor, now) });
 const getMatch = (e, id = 'ab', tId = 't1') => {
   const t = e.tournaments.find(t => t.id === tId);
   return [...t.groups.flatMap(g => g.matches), ...t.playoffMatches, ...t.consolationMatches].find(m => m.id === id);
@@ -60,15 +60,20 @@ test('venue identifiers preserve canonical names and recognize existing venue la
   assert.equal(getSlotVenueId({ location: 'Altro centro' }), undefined);
 });
 
-test('admin adds a canonical slot only to the explicitly selected tournament without mutating input', () => {
+test('admin adds an event-wide canonical slot without selecting a tournament or mutating input', () => {
   const original = event();
   const before = structuredClone(original);
   const updated = apply(original, { type: 'add', slot: slot('new', { start: '2030-06-04T18:00:00Z', location: 'ignored', field: '  Campo 3  ' }) }, admin);
   assert.deepEqual(original, before);
-  assert.equal(updated.tournaments[0].timeSlots.at(-1).location, 'Canottieri Salò');
-  assert.equal(updated.tournaments[0].timeSlots.at(-1).field, 'Campo 3');
+  assert.equal(updated.globalTimeSlots.at(-1).location, 'Canottieri Salò');
+  assert.equal(updated.globalTimeSlots.at(-1).field, 'Campo 3');
   assert.deepEqual(updated.tournaments[1], original.tournaments[1]);
-  assert.deepEqual(updated.globalTimeSlots, original.globalTimeSlots);
+  for (const t of updated.tournaments) {
+    assert.ok(getTournamentAvailabilitySlots(updated, t, now).some(s => s.id === 'new'));
+  }
+  const empty = event({ tournaments: [] });
+  const result = applyTournamentSlotAction(empty, undefined, { type: 'add', slot: slot() }, admin, now);
+  assert.equal(result.globalTimeSlots.length, 1);
 });
 
 test('slot administration rejects duplicates, invalid dates, past slots, empty courts and non-admins', () => {
@@ -92,11 +97,11 @@ test('booking saves venue, day, time and court and preserves all other tournamen
   assert.equal(getMatch(original).status, 'pending');
 });
 
-test('same id or physical court at the same time is locked only in the selected tournament', () => {
+test('a booking locks the slot in all tournaments of the event, even with repeated match ids', () => {
   let e = apply(event(), { type: 'book', matchId: 'ab', slotId: 's1' });
   assert.throws(() => apply(e, { type: 'book', matchId: 'cd', slotId: 's1' }, admin), /appena prenotato/);
-  e = apply(e, { type: 'book', matchId: 'ab', slotId: 's1' }, participant, 't2');
-  assert.equal(getMatch(e, 'ab', 't2').slotId, 's1');
+  assert.throws(() => apply(e, { type: 'book', matchId: 'ab', slotId: 's1' }, participant, 't2'), /appena prenotato/);
+  assert.ok(!getTournamentAvailabilitySlots(e, e.tournaments[1], now).some(s => s.id === 's1'));
   assert.equal(getMatch(e).slotId, 's1');
 });
 
@@ -124,12 +129,14 @@ test('other courts and other venues remain bookable at the exact same time', () 
   assert.deepEqual(getTournamentAvailabilitySlots(e, e.tournaments[0], now).map(s => s.id), ['p1']);
 });
 
-test('global legacy and other-tournament slots cannot be booked from this tournament', () => {
+test('global legacy and previously tournament-local slots are bookable throughout their event', () => {
   const e = event();
-  e.tournaments[1].timeSlots.push(slot('other-only'));
-  for (const slotId of ['global-only', 'other-only', 'missing']) {
-    assert.throws(() => apply(e, { type: 'book', matchId: 'ab', slotId }), /non è più disponibile/);
+  e.globalTimeSlots.push(slot('global-only', { field: 'Campo 3' }));
+  e.tournaments[1].timeSlots.push(slot('other-only', { field: 'Campo 4' }));
+  for (const slotId of ['global-only', 'other-only']) {
+    assert.equal(getMatch(apply(e, { type: 'book', matchId: 'ab', slotId })).slotId, slotId);
   }
+  assert.throws(() => apply(e, { type: 'book', matchId: 'ab', slotId: 'missing' }), /non è più disponibile/);
 });
 
 test('rescheduling moves to the other venue, releases the old slot and can retain the current booking', () => {
@@ -153,9 +160,20 @@ test('admin can delete only free slots; deleting cannot erase a reservation', ()
   const original = event();
   const updated = apply(original, { type: 'delete', slotId: 's1' }, admin);
   assert.equal(updated.tournaments[0].timeSlots.some(s => s.id === 's1'), false);
-  assert.deepEqual(updated.tournaments[1], original.tournaments[1]);
+  assert.ok(updated.tournaments.every(t => !t.timeSlots.some(s => s.id === 's1')));
+  assert.ok(!getEventSlots(updated).some(s => s.id === 's1'));
   const booked = apply(original, { type: 'book', matchId: 'ab', slotId: 's1' });
   assert.throws(() => apply(booked, { type: 'delete', slotId: 's1' }, admin), /Non puoi eliminare/);
+});
+
+test('event-wide deletion removes global and legacy copies and checks bookings in other tournaments', () => {
+  const original = event({ globalTimeSlots: [slot()] });
+  const updated = { ...original, ...applyTournamentSlotAction(original, undefined, { type: 'delete', slotId: 's1' }, admin, now) };
+  assert.ok(!getEventSlots(updated).some(s => s.id === 's1'));
+  assert.ok(!updated.globalTimeSlots.some(s => s.id === 's1'));
+  const booked = apply(original, { type: 'book', matchId: 'ab', slotId: 's1' }, participant, 't2');
+  assert.throws(() => applyTournamentSlotAction(booked, undefined, { type: 'delete', slotId: 's1' }, admin, now), /Non puoi eliminare/);
+  assert.throws(() => apply(booked, { type: 'add', slot: slot('duplicate') }, admin), /già presente/);
 });
 
 test('missing matches, unauthorized players and completed fixtures fail explicitly', () => {
@@ -254,8 +272,8 @@ test('transaction retries reject the loser of simultaneous bookings for the same
   assert.equal(matches.filter(item => item.status === 'scheduled').length, 1);
 });
 
-test('concurrent bookings on different courts and isolated tournaments both survive transaction retries', async () => {
-  for (const [tId, slotId] of [['t1', 's2'], ['t2', 's1']]) {
+test('concurrent bookings on different courts across tournaments survive transaction retries', async () => {
+  for (const [tId, slotId] of [['t1', 's2'], ['t2', 's2']]) {
     firestore.reset({ 'events/event': event() });
     await Promise.all([
       saveTournamentSlotAction('event', 't1', { type: 'book', matchId: 'ab', slotId: 's1' }, admin),
@@ -264,6 +282,36 @@ test('concurrent bookings on different courts and isolated tournaments both surv
     assert.equal(getMatch(firestore.store['events/event']).slotId, 's1');
     assert.equal(getMatch(firestore.store['events/event'], 'cd', tId).slotId, slotId);
   }
+});
+
+test('concurrent bookings of one shared slot from different tournaments reject one writer', async () => {
+  firestore.reset({ 'events/event': event() });
+  const results = await Promise.allSettled(['t1', 't2'].map(tId =>
+    saveTournamentSlotAction('event', tId, { type: 'book', matchId: 'ab', slotId: 's1' }, admin)
+  ));
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.match(results.find(result => result.status === 'rejected').reason.message, /appena prenotato/);
+});
+
+test('identical resources in different events remain independently bookable', async () => {
+  firestore.reset({ 'events/first': event(), 'events/second': event() });
+  await Promise.all(['first', 'second'].map(eventId =>
+    saveTournamentSlotAction(eventId, 't1', { type: 'book', matchId: 'ab', slotId: 's1' }, admin)
+  ));
+  for (const key of ['events/first', 'events/second']) assert.equal(getMatch(firestore.store[key]).slotId, 's1');
+});
+
+test('rescheduling and cancellation release shared slots for every tournament', () => {
+  let e = apply(event(), { type: 'book', matchId: 'ab', slotId: 's1' });
+  e = apply(e, { type: 'reschedule', matchId: 'ab', slotId: 'p1' });
+  for (const t of e.tournaments) {
+    const ids = getTournamentAvailabilitySlots(e, t, now).map(slot => slot.id);
+    assert.ok(ids.includes('s1'));
+    assert.ok(!ids.includes('p1'));
+  }
+  e = apply(e, { type: 'cancel', matchId: 'ab' });
+  assert.equal(isEventSlotBooked(e, slot('p1', { venueId: 'paitone-arena', location: 'Paitone Arena' })), false);
+  assert.ok(getTournamentAvailabilitySlots(e, e.tournaments[1], now).some(slot => slot.id === 'p1'));
 });
 
 test('booking transactions preserve unrelated event data and do not write on failed commit or missing event', async () => {
