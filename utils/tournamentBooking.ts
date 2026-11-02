@@ -22,7 +22,9 @@ export function applyTournamentSlotAction(
 ): Pick<Event, 'tournaments' | 'globalTimeSlots'> {
   const cleanedEvent = { ...event, ...pruneExpiredFreeSlots(event, now) };
   if (action.type === 'purge-expired') {
-    if (!actor.isOrganizer) throw new Error('Solo l’amministratore può gestire gli slot.');
+    if (!actor.isOrganizer && (!actor.playerId || !event.players.some(player => player.id === actor.playerId))) {
+      throw new Error('Solo l’amministratore o un giocatore dell’evento può eliminare gli slot scaduti.');
+    }
     return pruneExpiredFreeSlots(event, now);
   }
   const update = applyAction(cleanedEvent, tournamentId, action, actor, now);

@@ -370,7 +370,10 @@ test('cleanup removes expired free global and legacy copies without touching oth
   assert.deepEqual(update.tournaments[0], e.tournaments[0]);
   assert.deepEqual(update.tournaments[1].groups, e.tournaments[1].groups);
   assert.deepEqual(e, before);
-  assert.throws(() => applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, participant, atDeadline), /amministratore/);
+  assert.doesNotThrow(() => applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, participant, atDeadline));
+  for (const actor of [{ isOrganizer: false }, { isOrganizer: false, playerId: 'outsider' }]) {
+    assert.throws(() => applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, actor, atDeadline), /giocatore dell’evento/);
+  }
 });
 
 test('expiry preserves existing bookings, but cancellation or rescheduling after expiry removes the old free slot', () => {
@@ -431,4 +434,23 @@ test('transaction cleanup deletes only expired free slots and does not hide comm
   firestore.reset({ 'events/event': e }, true);
   await assert.rejects(saveTournamentSlotAction('event', undefined, { type: 'purge-expired' }, admin), /commit rejected/);
   assert.deepEqual(firestore.store['events/event'], e);
+});
+
+test('simultaneous participant logins clean only expired free slots and preserve booked resources', async () => {
+  const e = withExpiry();
+  e.globalTimeSlots[0].expiresAt = '2020-01-01T00:00:00Z';
+  e.globalTimeSlots.push(slot('booked-expired', { expiresAt: '2020-01-01T00:00:00Z', field: 'Campo 6' }));
+  Object.assign(getMatch(e, 'ab', 't2'), {
+    status: 'scheduled', slotId: 'booked-expired', scheduledTime: slot().start, location: slot().location, field: 'Campo 6',
+  });
+  firestore.reset({ 'events/event': e, 'events/unrelated': e });
+  await Promise.all(['a', 'b'].map(playerId =>
+    saveTournamentSlotAction('event', undefined, { type: 'purge-expired' }, { isOrganizer: false, playerId })
+  ));
+  const stored = firestore.store['events/event'];
+  assert.ok(!getEventSlots(stored).some(s => s.id === 'expiring'));
+  assert.ok(getEventSlots(stored).some(s => s.id === 'booked-expired'));
+  assert.deepEqual(stored.tournaments, e.tournaments);
+  assert.deepEqual(firestore.store['events/unrelated'], e);
+  await assert.rejects(saveTournamentSlotAction('event', undefined, { type: 'purge-expired' }, { isOrganizer: false, playerId: 'outsider' }), /giocatore dell’evento/);
 });

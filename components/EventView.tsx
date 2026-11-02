@@ -9,9 +9,6 @@ import AdminMatchCounts from "./AdminMatchCounts";
 import TournamentVenueSlots from './TournamentVenueSlots';
 import BookedVenueSlots from './BookedVenueSlots';
 import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
-import { getExpiredFreeSlotIds } from '../utils/tournamentAvailability';
-import { saveTournamentSlotAction } from '../services/tournamentBookingService';
-import { useSlotClock } from './useSlotClock';
 
 interface EventViewProps {
   event: Event;
@@ -55,22 +52,6 @@ const EventView: React.FC<EventViewProps> = ({
   const [editTournamentName, setEditTournamentName] = useState<string>('');
   const [editTournamentLoading, setEditTournamentLoading] = useState<boolean>(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminEventSection>('tournaments');
-  const [expiryError, setExpiryError] = useState<string | null>(null);
-  const [expiryRetry, setExpiryRetry] = useState(0);
-  const now = useSlotClock(event);
-  const expiredSlotsKey = isOrganizer ? [...getExpiredFreeSlotIds(event, now)].sort().join('|') : '';
-
-  useEffect(() => {
-    let active = true;
-    setExpiryError(null);
-    if (isOrganizer && expiredSlotsKey) {
-      saveTournamentSlotAction(event.id, undefined, { type: 'purge-expired' }, { isOrganizer: true })
-        .catch(cause => {
-          if (active) setExpiryError(cause instanceof Error ? cause.message : 'Pulizia degli slot scaduti non riuscita.');
-        });
-    }
-    return () => { active = false; };
-  }, [event, isOrganizer, expiredSlotsKey, expiryRetry]);
 
   useEffect(() => {
     setRulesDraft(event.rules ?? "");
@@ -332,12 +313,6 @@ const EventView: React.FC<EventViewProps> = ({
       </div>
 
       {/* CARD TORNEI */}
-      {isOrganizer && expiryError && (
-        <div role="alert" className="bg-secondary rounded-lg p-4 mb-4 text-red-400">
-          Pulizia degli slot scaduti da Firebase non riuscita: {expiryError} Gli slot scaduti restano comunque non prenotabili.
-          <button onClick={() => setExpiryRetry(value => value + 1)} className="ml-3 text-accent underline">Riprova pulizia</button>
-        </div>
-      )}
       {(!isOrganizer || activeAdminSection === 'tournaments') && (
       <div>
         <h2 className="text-2xl font-bold text-white mb-4">Tornei</h2>
