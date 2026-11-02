@@ -76,6 +76,7 @@ export interface TimeSlot {
     location: string;
     field: string;
     venueId?: 'canottieri-salo' | 'paitone-arena';
+    expiresAt?: string;
 }
 
 export interface PlayoffMatch {

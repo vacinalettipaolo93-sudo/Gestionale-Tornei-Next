@@ -3,6 +3,7 @@ import { type Event, type Match, type Tournament } from '../types';
 import { saveTournamentSlotAction } from '../services/tournamentBookingService';
 import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
 import { getCompetitorName } from '../utils/padel';
+import { useSlotClock } from './useSlotClock';
 import { formatTournamentSlotDate, formatTournamentSlotTime, getSlotVenueId, TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 
 const TournamentBookingModal: React.FC<{
@@ -19,7 +20,8 @@ const TournamentBookingModal: React.FC<{
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
-  const slots = getTournamentAvailabilitySlots(event, tournament, Date.now(), reschedule ? match.id : undefined);
+  const now = useSlotClock(event);
+  const slots = getTournamentAvailabilitySlots(event, tournament, now, reschedule ? match.id : undefined);
   const venueSlots = slots.filter(slot => venueId === 'legacy' ? !getSlotVenueId(slot) : getSlotVenueId(slot) === venueId);
   const dates = [...new Set(venueSlots.map(slot => getAvailabilityDateKey(slot.start)))];
   const selectedSlot = venueSlots.find(slot => slot.id === slotId);

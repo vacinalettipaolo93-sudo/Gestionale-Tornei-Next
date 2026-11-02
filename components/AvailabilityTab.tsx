@@ -9,6 +9,7 @@ import {
 } from "../services/availabilityService";
 import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from "../utils/tournamentAvailability";
 import { useTournamentAvailability } from "./useTournamentAvailability";
+import { useSlotClock } from "./useSlotClock";
 
 type Props = {
   event: Event;
@@ -40,7 +41,8 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const participantIds = selectedGroup.playerIds ?? [];
   const participants = participantIds.map(pid => event.players.find(p => p.id === pid)).filter(Boolean) as Player[];
 
-  const futureSlots = getTournamentAvailabilitySlots(event, tournament);
+  const now = useSlotClock(event);
+  const futureSlots = getTournamentAvailabilitySlots(event, tournament, now);
 
   // derive unique date keys (YYYY-MM-DD) from futureSlots, sorted
   const dateKeys = useMemo(() => {

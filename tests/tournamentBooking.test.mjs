@@ -325,3 +325,110 @@ test('booking transactions preserve unrelated event data and do not write on fai
   assert.deepEqual(firestore.store['events/unrelated'], original['events/unrelated']);
   await assert.rejects(saveTournamentSlotAction('missing', 't1', { type: 'book', matchId: 'ab', slotId: 's1' }, admin), /Evento non trovato/);
 });
+
+const deadline = '2030-01-02T00:00:00Z';
+const atDeadline = Date.parse(deadline);
+const withExpiry = () => event({ globalTimeSlots: [slot('expiring', { expiresAt: deadline, field: 'Campo 5' })] });
+
+test('expiry is optional, persisted per newly inserted slot and validated as a future instant', () => {
+  const e = event();
+  const created = apply(e, { type: 'add', slot: slot('expiring', { expiresAt: deadline, field: 'Campo 5' }) }, admin);
+  assert.equal(created.globalTimeSlots[0].expiresAt, new Date(deadline).toISOString());
+  assert.deepEqual(created.tournaments, e.tournaments);
+  assert.equal(created.tournaments[0].timeSlots[0].expiresAt, undefined);
+  for (const expiresAt of ['bad', '', new Date(now).toISOString(), '2020-01-01T00:00:00Z']) {
+    assert.throws(() => apply(e, { type: 'add', slot: slot('new', { expiresAt, field: 'Campo 5' }) }, admin), /scadenza futura/);
+  }
+});
+
+test('expiry hides and blocks a free slot exactly at the deadline in all tournaments without relying on cleanup', () => {
+  const e = withExpiry();
+  for (const t of e.tournaments) {
+    assert.ok(getTournamentAvailabilitySlots(e, t, atDeadline - 1).some(s => s.id === 'expiring'));
+    for (const time of [atDeadline, atDeadline + 1]) {
+      assert.ok(!getTournamentAvailabilitySlots(e, t, time).some(s => s.id === 'expiring'));
+      assert.throws(() => applyTournamentSlotAction(e, t.id, { type: 'book', matchId: 'ab', slotId: 'expiring' }, admin, time), /non è più disponibile/);
+    }
+    assert.ok(getTournamentAvailabilitySlots(e, t, atDeadline).some(s => s.id === 's1'));
+  }
+  assert.equal(e.globalTimeSlots.length, 1);
+});
+
+test('malformed stored expiry fails closed rather than reopening the slot', () => {
+  const e = withExpiry();
+  e.globalTimeSlots[0].expiresAt = 'invalid';
+  assert.ok(!getTournamentAvailabilitySlots(e, e.tournaments[0], now).some(s => s.id === 'expiring'));
+  assert.throws(() => apply(e, { type: 'book', matchId: 'ab', slotId: 'expiring' }), /non è più disponibile/);
+});
+
+test('cleanup removes expired free global and legacy copies without touching other slots or matches', () => {
+  const e = withExpiry();
+  e.tournaments[1].timeSlots.push(slot('expiring', { expiresAt: deadline, field: 'Campo 5' }));
+  const before = structuredClone(e);
+  const update = applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, admin, atDeadline);
+  assert.ok(!getEventSlots({ ...e, ...update }).some(s => s.id === 'expiring'));
+  assert.deepEqual(update.tournaments[0], e.tournaments[0]);
+  assert.deepEqual(update.tournaments[1].groups, e.tournaments[1].groups);
+  assert.deepEqual(e, before);
+  assert.throws(() => applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, participant, atDeadline), /amministratore/);
+});
+
+test('expiry preserves existing bookings, but cancellation or rescheduling after expiry removes the old free slot', () => {
+  const e = apply(withExpiry(), { type: 'book', matchId: 'ab', slotId: 'expiring' });
+  const cleaned = { ...e, ...applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, admin, atDeadline) };
+  assert.equal(getMatch(cleaned).slotId, 'expiring');
+  assert.ok(getEventSlots(cleaned).some(s => s.id === 'expiring'));
+  assert.ok(getTournamentAvailabilitySlots(cleaned, cleaned.tournaments[0], atDeadline, 'ab').some(s => s.id === 'expiring'));
+  assert.ok(!getTournamentAvailabilitySlots(cleaned, cleaned.tournaments[1], atDeadline, 'ab').some(s => s.id === 'expiring'));
+  assert.doesNotThrow(() => applyTournamentSlotAction(cleaned, 't1', { type: 'reschedule', matchId: 'ab', slotId: 'expiring' }, admin, atDeadline));
+  for (const action of [{ type: 'cancel', matchId: 'ab' }, { type: 'reschedule', matchId: 'ab', slotId: 'p1' }]) {
+    const updated = { ...e, ...applyTournamentSlotAction(e, 't1', action, admin, atDeadline) };
+    assert.ok(!getEventSlots(updated).some(s => s.id === 'expiring'));
+    assert.equal(getMatch(updated).status, action.type === 'cancel' ? 'pending' : 'scheduled');
+  }
+});
+
+test('expiry cleanup preserves physical bookings under other slot ids and legacy reservations', () => {
+  for (const fields of [
+    { slotId: 'alias' },
+    { scheduledTime: slot().start, location: 'Canottieri Salo', field: 'Campo 5' },
+  ]) {
+    const e = withExpiry();
+    e.tournaments[1].timeSlots.push(slot('alias', { field: 'Campo 5' }));
+    Object.assign(getMatch(e, 'ab', 't2'), fields, { status: 'scheduled' });
+    const updated = { ...e, ...applyTournamentSlotAction(e, undefined, { type: 'purge-expired' }, admin, atDeadline) };
+    assert.ok(getEventSlots(updated).some(s => s.id === 'expiring'));
+  }
+});
+
+test('an expired free resource can be offered again with a new expiry without altering old slots', () => {
+  const update = applyTournamentSlotAction(withExpiry(), undefined, {
+    type: 'add', slot: slot('renewed', { expiresAt: '2030-01-03T00:00:00Z', field: 'Campo 5' }),
+  }, admin, atDeadline);
+  assert.equal(update.globalTimeSlots.length, 1);
+  assert.equal(update.globalTimeSlots[0].id, 'renewed');
+});
+
+test('concurrent cleanup and booking before expiry preserve the winner and never remove its reservation', async () => {
+  const e = withExpiry();
+  e.globalTimeSlots[0].expiresAt = '2099-01-01T00:00:00Z';
+  firestore.reset({ 'events/event': e });
+  await Promise.all([
+    saveTournamentSlotAction('event', undefined, { type: 'purge-expired' }, admin),
+    saveTournamentSlotAction('event', 't2', { type: 'book', matchId: 'ab', slotId: 'expiring' }, admin),
+  ]);
+  assert.equal(getMatch(firestore.store['events/event'], 'ab', 't2').slotId, 'expiring');
+  assert.ok(getEventSlots(firestore.store['events/event']).some(s => s.id === 'expiring'));
+});
+
+test('transaction cleanup deletes only expired free slots and does not hide commit failures', async () => {
+  const e = withExpiry();
+  e.globalTimeSlots[0].expiresAt = '2020-01-01T00:00:00Z';
+  firestore.reset({ 'events/event': e, 'events/other': e });
+  await saveTournamentSlotAction('event', undefined, { type: 'purge-expired' }, admin);
+  assert.equal(firestore.store['events/event'].globalTimeSlots.length, 0);
+  assert.equal(firestore.store['events/other'].globalTimeSlots.length, 1);
+  firestore.reset({ 'events/event': e }, true);
+  await assert.rejects(saveTournamentSlotAction('event', undefined, { type: 'purge-expired' }, admin), /commit rejected/);
+  assert.deepEqual(firestore.store['events/event'], e);
+});
