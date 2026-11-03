@@ -52,6 +52,103 @@ const getMatch = (e, id = 'ab', tId = 't1') => {
   const t = e.tournaments.find(t => t.id === tId);
   return [...t.groups.flatMap(g => g.matches), ...t.playoffMatches, ...t.consolationMatches].find(m => m.id === id);
 };
+const externalBooking = overrides => ({
+  venueId: 'canottieri-salo', date: '2030-06-03', time: '18:00', field: '', confirmed: true, ...overrides,
+});
+const withoutSlots = () => event({ tournaments: [tournament('t1', { timeSlots: [] }), tournament('t2', { timeSlots: [] })] });
+
+test('external court confirmation registers a match without admin slots or creating inventory', () => {
+  const original = withoutSlots();
+  const e = apply(original, { type: 'book-external', matchId: 'ab', booking: externalBooking() });
+  assert.deepEqual(getMatch(e), {
+    ...match(), status: 'scheduled', scheduledTime: new Date('2030-06-03T18:00:00').toISOString(),
+    location: 'Canottieri Salò', field: '',
+  });
+  assert.equal('slotId' in getMatch(e), false);
+  assert.deepEqual(e.globalTimeSlots, []);
+  assert.deepEqual(e.tournaments.map(t => t.timeSlots), [[], []]);
+  assert.deepEqual(e.tournaments[1], original.tournaments[1]);
+  assert.deepEqual(e.players, original.players);
+  assert.equal(getMatch(original).status, 'pending');
+});
+
+test('external booking requires valid future day, time, venue and explicit confirmation', () => {
+  for (const invalid of [
+    { date: '' }, { time: '' }, { date: '2030-02-30' }, { date: '2030-13-01' },
+    { time: '24:00' }, { time: '18:65' }, { date: '2020-06-03' }, { venueId: 'other' },
+    { confirmed: false }, { confirmed: 'yes' }, { field: null },
+  ]) {
+    assert.throws(() => apply(withoutSlots(), { type: 'book-external', matchId: 'ab', booking: externalBooking(invalid) }));
+  }
+  const e = apply(withoutSlots(), { type: 'book-external', matchId: 'ab', booking: externalBooking({
+    venueId: 'paitone-arena', field: ' Campo 2 ',
+  }) });
+  assert.equal(getMatch(e).location, 'Paitone Arena');
+  assert.equal(getMatch(e).field, 'Campo 2');
+});
+
+test('external registration preserves local wall time and rejects the exact start instant or later', () => {
+  const action = { type: 'book-external', matchId: 'ab', booking: externalBooking() };
+  const start = new Date('2030-06-03T18:00:00').getTime();
+  const e = withoutSlots();
+  const update = applyTournamentSlotAction(e, 't1', action, participant, start - 1);
+  assert.equal(new Date(getMatch({ ...e, ...update }).scheduledTime).getHours(), 18);
+  assert.equal(new Date(getMatch({ ...e, ...update }).scheduledTime).getDate(), 3);
+  for (const time of [start, start + 1]) {
+    assert.throws(() => applyTournamentSlotAction(e, 't1', action, participant, time), /futuri validi/);
+  }
+});
+
+test('external reschedule replaces legacy slot linkage and cancellation removes only app booking data', () => {
+  let e = apply(event(), { type: 'book', matchId: 'ab', slotId: 's1' });
+  e = apply(e, { type: 'reschedule-external', matchId: 'ab', booking: externalBooking({ venueId: 'paitone-arena' }) });
+  assert.equal(getMatch(e).location, 'Paitone Arena');
+  assert.equal('slotId' in getMatch(e), false);
+  assert.ok(getEventSlots(e).some(s => s.id === 's1'));
+  assert.equal(isEventSlotBooked(e, slot()), false);
+  e = apply(e, { type: 'cancel', matchId: 'ab' });
+  assert.deepEqual(getMatch(e), match());
+  assert.deepEqual(e.globalTimeSlots, []);
+});
+
+test('external registration enforces permissions, match status and known court collisions within the event', () => {
+  const action = { type: 'book-external', matchId: 'ab', booking: externalBooking({ field: 'Campo 1' }) };
+  const e = apply(withoutSlots(), action);
+  assert.throws(() => apply(e, action), /già prenotata/);
+  assert.throws(() => apply(e, { ...action, type: 'reschedule-external', matchId: 'cd' }, admin), /è stata modificata/);
+  assert.throws(() => apply(withoutSlots(), { ...action, matchId: 'cd' }), /in cui sei presente/);
+  assert.throws(() => apply(e, action, participant, 't2'), /già registrato/);
+  const completed = withoutSlots();
+  getMatch(completed).status = 'completed';
+  assert.throws(() => apply(completed, action), /non è prenotabile/);
+  const parallel = apply(e, { ...action, matchId: 'cd', booking: externalBooking({ field: 'Campo 2' }) }, admin);
+  assert.equal(getMatch(parallel, 'cd').field, 'Campo 2');
+  const unknown = apply(e, { ...action, matchId: 'cd', booking: externalBooking() }, admin);
+  assert.equal(getMatch(unknown, 'cd').status, 'scheduled', 'unknown courts do not imply a venue-wide collision');
+});
+
+for (const phase of ['groups', 'playoffMatches', 'consolationMatches']) {
+  test(`external book, reschedule and cancel cover ${phase} for all four Padel players`, () => {
+    const t = tournament('t1', { timeSlots: [] });
+    const fixture = match('teams', { player1Id: 'team1', player2Id: 'team2' });
+    if (phase === 'groups') t.groups[0].matches = [fixture];
+    else { t.groups = []; t[phase] = [fixture]; }
+    t.padelTeams = [
+      { id: 'team1', player1Id: 'a', player2Id: 'b' },
+      { id: 'team2', player1Id: 'c', player2Id: 'd' },
+    ];
+    for (const playerId of ['a', 'b', 'c', 'd']) {
+      const actor = { isOrganizer: false, playerId };
+      let e = apply(event({ eventType: 'tournament_padel', tournaments: [t] }),
+        { type: 'book-external', matchId: 'teams', booking: externalBooking() }, actor);
+      assert.equal(getMatch(e, 'teams').status, 'scheduled');
+      e = apply(e, { type: 'reschedule-external', matchId: 'teams', booking: externalBooking({ venueId: 'paitone-arena' }) }, actor);
+      assert.equal(getMatch(e, 'teams').location, 'Paitone Arena');
+      e = apply(e, { type: 'cancel', matchId: 'teams' }, actor);
+      assert.deepEqual(getMatch(e, 'teams'), fixture);
+    }
+  });
+}
 
 test('venue identifiers preserve canonical names and recognize existing venue labels', () => {
   assert.equal(getSlotVenueId({ location: 'Tennis Salò Canottieri' }), 'canottieri-salo');
@@ -259,6 +356,34 @@ const compiledService = ts.transpileModule(serviceSource, {
   .replace("import { db } from '../firebase';", 'const db = {};')
   .replace("'../utils/tournamentBooking'", JSON.stringify(bookingUrl));
 const { saveTournamentSlotAction } = await import(dataUrl(compiledService));
+
+test('external booking transaction retries preserve independent registrations and reject duplicate match bookings', async () => {
+  const action = { type: 'book-external', matchId: 'ab', booking: externalBooking() };
+  firestore.reset({ 'events/event': withoutSlots() });
+  await Promise.all(['ab', 'cd'].map(matchId =>
+    saveTournamentSlotAction('event', 't1', { ...action, matchId }, admin)));
+  assert.equal(getMatch(firestore.store['events/event']).status, 'scheduled');
+  assert.equal(getMatch(firestore.store['events/event'], 'cd').status, 'scheduled');
+  firestore.reset({ 'events/event': withoutSlots() });
+  const duplicate = await Promise.allSettled([1, 2].map(() => saveTournamentSlotAction('event', 't1', action, admin)));
+  assert.equal(duplicate.filter(result => result.status === 'fulfilled').length, 1);
+  assert.match(duplicate.find(result => result.status === 'rejected').reason.message, /già prenotata/);
+});
+
+test('external registration rejects same-court races, reports commit failures and isolates other events', async () => {
+  const action = { type: 'book-external', matchId: 'ab', booking: externalBooking({ field: 'Campo 1' }) };
+  firestore.reset({ 'events/event': withoutSlots() });
+  const results = await Promise.allSettled(['t1', 't2'].map(t => saveTournamentSlotAction('event', t, action, admin)));
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.match(results.find(result => result.status === 'rejected').reason.message, /già registrato/);
+  const original = { 'events/event': withoutSlots(), 'events/other': withoutSlots() };
+  firestore.reset(original, true);
+  await assert.rejects(saveTournamentSlotAction('event', 't1', action, admin), /commit rejected/);
+  assert.deepEqual(firestore.store, original);
+  firestore.reset(original);
+  await saveTournamentSlotAction('event', 't1', action, admin);
+  assert.deepEqual(firestore.store['events/other'], original['events/other']);
+});
 
 test('transaction retries reject the loser of simultaneous bookings for the same court', async () => {
   firestore.reset({ 'events/event': event() });

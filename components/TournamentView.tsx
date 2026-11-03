@@ -431,7 +431,7 @@ const TournamentView: React.FC<TournamentViewProps> = ({
         )}
         {cancelingMatch && (
           <CenteredDialog title="Annulla prenotazione" busy={savingResult} onClose={() => setCancelingMatch(null)}>
-            <p>Vuoi annullare la prenotazione? Il campo torna disponibile e la partita resta da giocare.</p>
+            <p>Vuoi annullare la registrazione nell’app? La partita resta da giocare. Il campo NON viene annullato: devi cancellarlo anche su Playtomic o Wansport.</p>
             {bookingError && <p role="alert" className="text-red-400 mt-3">{bookingError}</p>}
             <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button disabled={savingResult} onClick={() => setCancelingMatch(null)} className="bg-tertiary px-4 py-2 rounded">Mantieni prenotazione</button>

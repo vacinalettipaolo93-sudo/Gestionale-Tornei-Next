@@ -105,7 +105,7 @@ test('desktop columns are ordered Canottieri then Paitone with names, tournament
   assert.match(html, /giugno 2030/);
   assert.match(html, /Ore \d{2}:\d{2}/);
   assert.match(html, /Campo 1/);
-  assert.match(html, /Nessuno slot prenotato per questo centro/);
+  assert.match(html, /Nessuna partita prenotata per questo centro/);
 });
 
 test('Padel reservations display both teams and all four player names', () => {
@@ -128,7 +128,7 @@ test('unrecognized centres and missing dates stay visible with explicit warnings
   assert.match(html, /Data e ora non disponibili/);
   assert.match(html, /Campo non specificato/);
   assert.ok(!html.includes('Invalid Date'));
-  assert.equal((render(event({ tournaments: [] })).match(/Nessuno slot prenotato per questo centro/g) || []).length, 2);
+  assert.equal((render(event({ tournaments: [] })).match(/Nessuna partita prenotata per questo centro/g) || []).length, 2);
 });
 
 test('scheduled reservations offer edit/cancel while completed reservations remain read-only', () => {
@@ -141,15 +141,36 @@ test('scheduled reservations offer edit/cancel while completed reservations rema
   assert.ok(!render(completed).includes('Modifica prenotazione'));
 });
 
-test('admin slot form places expiry above insertion and hides expired free slots without hiding booked ones', () => {
+test('admin centre panels replace manual slot entry with the correct external booking link', () => {
   const e = event({ globalTimeSlots: [
     slot('expired-free', { expiresAt: '2020-01-01T00:00:00Z', field: 'Campo libero scaduto' }),
     slot('s1', { expiresAt: '2020-01-01T00:00:00Z', field: 'Campo prenotato' }),
     slot('no-expiry', { field: 'Campo senza scadenza' }),
   ] });
-  const html = renderToStaticMarkup(React.createElement(TournamentVenueSlots, { event: e, venueId: 'canottieri-salo' }));
-  assert.ok(html.indexOf('Slot disponibili fino a') < html.indexOf('Aggiungi slot libero'));
-  assert.ok(!html.includes('Campo libero scaduto'));
-  assert.match(html, /Campo prenotato/);
-  assert.match(html, /Campo senza scadenza/);
+  const before = structuredClone(e);
+  for (const [venueId, url, provider] of [
+    ['canottieri-salo', 'https://playtomic.com/it/clubs/tennis-salo-canottieri', 'Playtomic'],
+    ['paitone-arena', 'https://paitonearena.wansport.com/', 'Wansport'],
+  ]) {
+    const html = renderToStaticMarkup(React.createElement(TournamentVenueSlots, { event: e, venueId }));
+    assert.ok(html.includes(`href="${url}"`));
+    assert.match(html, /target="_blank" rel="noopener noreferrer"/);
+    assert.ok(html.includes(provider));
+    assert.doesNotMatch(html, /<input|<form|Aggiungi slot libero|Slot disponibili fino a/);
+    assert.match(html, /giorno e orario già prenotati/);
+    assert.match(html, /non verifica la disponibilità/);
+  }
+  assert.deepEqual(e, before);
+});
+
+test('overview shows external bookings without slot ids and warns that external reservations are not synchronized', () => {
+  const e = event({ globalTimeSlots: [], tournaments: [tournament('t1', {
+    groups: [{ matches: [match('external', {
+      slotId: undefined, scheduledTime: '2030-06-03T18:00:00Z', location: 'Paitone Arena', field: '',
+    })] }],
+  })] });
+  const html = render(e);
+  assert.match(html, /Paitone Arena \(1\)/);
+  assert.match(html, /Campo non specificato/);
+  assert.match(html, /non modifica né annulla il campo su Playtomic o Wansport/);
 });

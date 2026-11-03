@@ -253,7 +253,7 @@ const EventView: React.FC<EventViewProps> = ({
                 className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === venue.id ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
                 onClick={() => setActiveAdminSection(venue.id)}
               >
-                Slot orari {venue.name}
+                Prenota campo {venue.name}
               </button>
             ))}
 
@@ -261,7 +261,7 @@ const EventView: React.FC<EventViewProps> = ({
               className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'bookedSlots' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
               onClick={() => setActiveAdminSection('bookedSlots')}
             >
-              Slot orari prenotati
+              Prenotazioni partite
             </button>
 
             <button
