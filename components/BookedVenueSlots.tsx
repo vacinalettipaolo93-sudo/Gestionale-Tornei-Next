@@ -14,13 +14,13 @@ const BookedVenueSlots: React.FC<{ event: Event }> = ({ event }) => {
   const [success, setSuccess] = useState<string | null>(null);
   const selectedBooking = bookings.find(booking => booking.tournament.id === editing?.tournamentId && booking.match.id === editing.matchId);
   const cancelBooking = async ({ tournament, match }: EventBooking) => {
-    if (saving || !window.confirm(`Cancellare la prenotazione di ${getCompetitorName(event, tournament, match.player1Id)} vs ${getCompetitorName(event, tournament, match.player2Id)}? La partita resterà da giocare.`)) return;
+    if (saving || !window.confirm(`Cancellare la registrazione di ${getCompetitorName(event, tournament, match.player1Id)} vs ${getCompetitorName(event, tournament, match.player2Id)} nell’app? La partita resterà da giocare. Il campo NON viene annullato: cancellalo anche su Playtomic o Wansport.`)) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       await saveTournamentSlotAction(event.id, tournament.id, { type: 'cancel', matchId: match.id }, { isOrganizer: true });
-      setSuccess('Prenotazione cancellata. La partita resta da giocare.');
+      setSuccess('Registrazione cancellata nell’app. La partita resta da giocare. Ricorda di annullare il campo anche su Playtomic o Wansport.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Impossibile cancellare la prenotazione.');
     } finally {
@@ -63,13 +63,13 @@ const BookedVenueSlots: React.FC<{ event: Event }> = ({ event }) => {
   const otherBookings = bookings.filter(booking => !booking.venueId);
 
   return (
-    <section className="bg-secondary rounded-xl p-4 sm:p-6 space-y-5" aria-label="Slot orari prenotati">
-      <h2 className="text-xl font-bold text-accent">Slot orari prenotati</h2>
+    <section className="bg-secondary rounded-xl p-4 sm:p-6 space-y-5" aria-label="Prenotazioni partite">
+      <h2 className="text-xl font-bold text-accent">Prenotazioni partite</h2>
       {error && <p role="alert" className="text-red-400">{error}</p>}
       {success && <p role="status" className="text-green-400">{success}</p>}
       <p className="text-sm text-text-secondary">
-        Prenotazioni di tutti i tornei di {event.name}, ordinate per giorno e ora, da riportare nei gestionali dei centri.
-        Giorno e ora indicano quando si gioca. Le prenotazioni annullate scompaiono e quelle spostate si aggiornano automaticamente.
+        Partite di tutti i tornei di {event.name}, ordinate per giorno e ora, registrate dopo la prenotazione autonoma del campo.
+        I dati dei circoli non vengono verificati o sincronizzati. Modificare o cancellare qui non modifica né annulla il campo su Playtomic o Wansport.
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {TOURNAMENT_VENUES.map(venue => {
@@ -79,7 +79,7 @@ const BookedVenueSlots: React.FC<{ event: Event }> = ({ event }) => {
               <h3 className="text-lg font-bold">{venue.name} ({venueBookings.length})</h3>
               {venueBookings.length > 0
                 ? <ul className="space-y-3">{venueBookings.map(renderBooking)}</ul>
-                : <p className="text-text-secondary">Nessuno slot prenotato per questo centro.</p>}
+                : <p className="text-text-secondary">Nessuna partita prenotata per questo centro.</p>}
             </section>
           );
         })}

@@ -160,6 +160,11 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   return (
     <div className="max-w-6xl mx-auto bg-secondary rounded-xl p-6 shadow space-y-6">
       <h3 className="text-xl font-bold text-accent">Disponibilità di gioco</h3>
+      <p className="text-sm text-highlight">
+        Per prenotare non servono slot inseriti dall’amministratore: apri Prenota sulla partita,
+        prenota il campo su Playtomic o Wansport e poi registra qui nell’app giorno e orario.
+        Questa scheda conserva le preferenze sugli slot precedenti e non indica la disponibilità reale dei circoli.
+      </p>
       <p className="text-sm text-text-secondary">
         Scegli prima il centro o entrambi, poi la data e gli orari in cui vuoi giocare.
         Cerca partita mostra prima le coincidenze di centro, data e ora, poi le alternative da concordare.

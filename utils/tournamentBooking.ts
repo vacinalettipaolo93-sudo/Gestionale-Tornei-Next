@@ -2,12 +2,14 @@ import { type Event, type Match, type TimeSlot, type Tournament } from '../types
 import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from './padel';
 import { getEventSlots, getTournamentMatches, isSameCourtTime, isEventSlotBooked, isSlotExpired, normalizeTournamentSlot, pruneExpiredFreeSlots } from './tournamentAvailability';
 import { TOURNAMENT_VENUES } from './tournamentVenues';
+import { validateExternalCourtBooking, type ExternalCourtBooking } from './externalCourtBooking';
 
 export type TournamentSlotAction =
   | { type: 'add'; slot: TimeSlot }
   | { type: 'delete'; slotId: string }
   | { type: 'purge-expired' }
   | { type: 'book' | 'reschedule'; matchId: string; slotId: string }
+  | { type: 'book-external' | 'reschedule-external'; matchId: string; booking: ExternalCourtBooking }
   | { type: 'cancel'; matchId: string };
 
 export interface BookingActor {
@@ -78,16 +80,26 @@ function applyAction(
     if (!match.player1Id || !match.player2Id || isCompleted(match)) {
       throw new Error('La partita non è prenotabile.');
     }
-    if (action.type === 'book' && match.status !== 'pending') {
+    const isNewBooking = action.type === 'book' || action.type === 'book-external';
+    if (isNewBooking && match.status !== 'pending') {
       throw new Error('La partita è già prenotata. Riapri la scheda per vedere la prenotazione.');
     }
-    if (action.type !== 'book' && match.status !== 'scheduled') {
+    if (!isNewBooking && match.status !== 'scheduled') {
       throw new Error('La prenotazione è stata modificata. Riapri la scheda.');
     }
     let updatedMatch: Match;
     if (action.type === 'cancel') {
       const { slotId, scheduledTime, location, field, ...rest } = match;
       updatedMatch = { ...rest, status: 'pending' };
+    } else if ('booking' in action) {
+      const booking = validateExternalCourtBooking(action.booking, now);
+      if (booking.field && isEventSlotBooked(event, {
+        id: '', start: booking.scheduledTime, location: booking.location, field: booking.field,
+      }, { tournamentId: tournament.id, matchId: match.id })) {
+        throw new Error('Questo campo è già registrato per un’altra partita dell’evento alla stessa data e ora. Verifica la prenotazione con il circolo.');
+      }
+      const { slotId, ...rest } = match;
+      updatedMatch = { ...rest, ...booking, status: 'scheduled' };
     } else {
       const slot = getEventSlots(event).find(item => item.id === action.slotId);
       if (!slot || Date.parse(slot.start) <= now || (isSlotExpired(slot, now) && !(action.type === 'reschedule' && match.slotId === slot.id))) {
