@@ -1,9 +1,10 @@
-import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
+import { doc, runTransaction } from 'firebase/firestore';
 import React, { useMemo, useState } from 'react';
 import { db } from '../firebase';
 import { type Event, type Player } from '../types';
 import { createInitialsAvatar } from '../utils/avatar';
 import { addPlayerToEvent, removePlayerFromEvent } from '../utils/eventPlayers.js';
+import { createPlayerWithAccount } from '../services/playerDataService';
 
 interface EventPlayersViewProps {
   event: Event;
@@ -98,57 +99,17 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
     setIsCreating(true);
     setFeedback(null);
     try {
-      const eventRef = doc(db, 'events', event.id);
-      const playersRef = collection(db, 'players');
-      const matchingPlayers = await getDocs(query(
-        playersRef,
-        where('name', '==', name),
-        where('phone', '==', phone),
-      ));
-      const existingPlayer = matchingPlayers.docs[0];
-      const playerRef = existingPlayer?.ref ?? doc(playersRef);
-      const result = await runTransaction(db, async transaction => {
-        const eventSnapshot = await transaction.get(eventRef);
-        const playerSnapshot = await transaction.get(playerRef);
-        if (!eventSnapshot.exists()) throw new Error('Evento non trovato.');
-
-        const profile = playerSnapshot.data() ?? {
-          name,
-          phone,
-          avatar: createInitialsAvatar(name),
-          status: 'confirmed',
-        };
-        const eventPlayer: Player = {
-          id: playerRef.id,
-          name: String(profile.name ?? name),
-          phone: String(profile.phone ?? ''),
-          avatar: String(profile.avatar ?? createInitialsAvatar(String(profile.name ?? name))),
-          status: 'confirmed',
-          ...(typeof profile.summerRankingStartPoints === 'number'
-            ? { summerRankingStartPoints: profile.summerRankingStartPoints }
-            : {}),
-          ...(typeof profile.summerRankingJoinedAt === 'string'
-            ? { summerRankingJoinedAt: profile.summerRankingJoinedAt }
-            : {}),
-        };
-        const association = addPlayerToEvent(eventSnapshot.data().players, eventPlayer);
-
-        if (!playerSnapshot.exists()) transaction.set(playerRef, profile);
-        if (association.added) transaction.update(eventRef, { players: association.players });
-        return { ...association, player: eventPlayer };
-      });
+      const player = await createPlayerWithAccount(name, phone, undefined, [event.id]);
 
       setNewPlayerName('');
       setNewPlayerPhone('');
       setFeedback({
         type: 'success',
-        message: result.added
-          ? `${result.player.name} creato e aggiunto all’evento.`
-          : `${result.player.name} esiste già ed è presente nell’evento.`,
+        message: `${player.name} salvato nell’archivio e aggiunto all’evento, con account di accesso. Le password esistenti non sono state modificate.`,
       });
     } catch (error) {
       console.error('Errore creazione giocatore per l’evento', error);
-      setFeedback({ type: 'error', message: 'Impossibile creare il giocatore. Riprova.' });
+      setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Impossibile creare il giocatore. Riprova.' });
     } finally {
       setIsCreating(false);
     }
@@ -196,6 +157,7 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
         </h2>
         <p className="text-text-secondary mt-1">
           I giocatori associati qui saranno disponibili per la futura creazione dei gironi.
+          {' '}Restano nell’archivio globale e possono essere aggiunti anche ai nuovi eventi.
         </p>
       </div>
 
@@ -253,6 +215,10 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
 
           <div className="bg-secondary rounded-xl shadow-lg p-6">
             <h3 className="text-lg font-semibold mb-3">Crea un nuovo giocatore</h3>
+            <p className="text-sm text-text-secondary mb-3">
+              Il nuovo account comparirà in Controllo Utenti: accesso con Nome Cognome e password iniziale 1234.
+              Le password degli account già esistenti restano invariate.
+            </p>
             <form onSubmit={createAndAssociatePlayer} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3">
               <input
                 type="text"

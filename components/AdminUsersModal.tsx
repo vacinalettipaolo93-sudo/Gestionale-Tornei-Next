@@ -3,6 +3,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { type Player, type User } from '../types';
 import { updatePlayerProfile } from '../utils/updatePlayerProfile';
+import { synchronizePlayerAccounts } from '../services/playerDataService';
 
 interface AdminUsersModalProps {
   users: User[];
@@ -45,6 +46,29 @@ const initialAction = (userId: string, action: ActionType): ActionState => ({
 const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, players, onClose }) => {
   const [actionState, setActionState] = useState<ActionState | null>(null);
   const [localUsers, setLocalUsers] = useState<User[]>(users);
+  const [checkingAccounts, setCheckingAccounts] = useState(true);
+  const [accountFeedback, setAccountFeedback] = useState('');
+  const [accountIssues, setAccountIssues] = useState<string[]>([]);
+
+  const checkAccounts = async () => {
+    setCheckingAccounts(true);
+    setAccountFeedback('');
+    setAccountIssues([]);
+    try {
+      const result = await synchronizePlayerAccounts();
+      setAccountFeedback(`Verifica completata: ${result.created} account mancanti creati. Le password esistenti sono rimaste invariate.`);
+      setAccountIssues(result.issues);
+    } catch (error) {
+      console.error('Errore sincronizzazione account giocatori', error);
+      setAccountIssues([error instanceof Error ? error.message : 'Verifica non riuscita. Riprova.']);
+    } finally {
+      setCheckingAccounts(false);
+    }
+  };
+
+  useEffect(() => {
+    void checkAccounts();
+  }, []);
 
   useEffect(() => {
     setLocalUsers(users);
@@ -203,6 +227,24 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, players, onClo
           Elenco utenti in ordine alfabetico. Le password non vengono mostrate.
           Puoi modificare username, nome del giocatore e telefono, cambiare la password o reimpostarla.
         </p>
+        <div className="mb-4 text-sm space-y-2">
+          <p className="text-text-secondary">
+            Gli account mancanti dei giocatori in archivio vengono recuperati con Nome Cognome e password iniziale 1234.
+            Chi ha già un account conserva la propria password.
+          </p>
+          <button
+            type="button"
+            onClick={() => void checkAccounts()}
+            disabled={checkingAccounts}
+            className="bg-tertiary disabled:opacity-50 font-semibold py-2 px-3 rounded-lg"
+          >
+            {checkingAccounts ? 'Verifica accessi...' : 'Verifica accessi giocatori'}
+          </button>
+          {accountFeedback && <p role="status" className="text-green-400">{accountFeedback}</p>}
+          {accountIssues.length > 0 && (
+            <p role="alert" className="text-red-400 whitespace-pre-line">{accountIssues.join('\n')}</p>
+          )}
+        </div>
 
         <div className="overflow-y-auto flex-1 space-y-2">
           {sortedUsers.map(user => {

@@ -27,6 +27,12 @@ Gli eventi legacy senza `eventType` sono considerati tornei Tennis, come nel res
 
 ## Controllo utenti amministratore
 
+La creazione da **Lista giocatori** salva insieme profilo globale, account partecipante e associazione all'evento. Il nuovo account usa **Nome Cognome** e password iniziale **1234** (non `123`) e compare in **Controllo Utenti**. Il giocatore resta nell'archivio condiviso, selezionabile dalla lista giocatori anche negli eventi creati successivamente: non viene iscritto automaticamente a tutti gli eventi. Rimuoverlo da una lista evento non elimina il profilo o l'account globale.
+
+Aprire **Controllo Utenti** avvia la verifica dell'archivio `players` e crea gli account mancanti, inclusi quelli dei giocatori inseriti in precedenza da Lista giocatori. **Verifica accessi giocatori** ripete l'operazione in caso di errore o nuove aggiunte. Gli account recuperati usano la password iniziale `1234`; gli account esistenti conservano sempre username e password, senza modificare profili, punti, iscrizioni o risultati. I nomi duplicati, gli account incompatibili e le password mancanti vengono segnalati per una correzione manuale, senza collegare un giocatore all'account di un altro.
+
+Il login accetta lo username esistente oppure il Nome Cognome attuale del giocatore collegato, ignorando maiuscole e spazi ripetuti. Gli username espliciti hanno precedenza e i nomi ambigui non permettono l'accesso. La password deve coincidere esattamente con quella salvata: `1234` non è una password alternativa per chi l'ha cambiata. I vecchi account non indicano se una password è stata cambiata autonomamente: anche un eventuale `123` già salvato viene quindi conservato, non convertito automaticamente. Per questi casi l'amministratore può reimpostare la password dopo verifica.
+
 In **Controllo Utenti**, il pulsante **Nome e telefono** permette di modificare i dati del giocatore collegato all'account. Il nome è obbligatorio; il telefono può essere modificato o svuotato. Dopo la conferma, un'unica transazione Firestore aggiorna l'archivio globale `players` e le copie del giocatore negli eventi, inclusi tornei e ranking Tennis e Padel. I listener esistenti mostrano i dati aggiornati anche agli altri utenti. Username, password, identificativo, iscrizioni, risultati e punti del giocatore non cambiano. Gli account senza giocatore collegato mantengono le sole azioni su username e password.
 
 ## Cerca partita per i partecipanti
