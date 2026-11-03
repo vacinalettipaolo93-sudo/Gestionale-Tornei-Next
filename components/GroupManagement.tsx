@@ -452,12 +452,16 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
                     <div>
                         <h5 className="text-sm font-semibold mb-2 text-text-secondary">{isPadel ? 'Squadre Assegnate' : 'Giocatori Assegnati'} ({group.playerIds.length})</h5>
                         {group.playerIds.length > 0 ? (
-                            <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                 {group.playerIds.map(competitorId => (
-                                    <li key={competitorId} className="bg-tertiary/50 p-2 rounded-lg flex items-center justify-between gap-2 group/player">
-                                        <div className="text-sm font-medium truncate">{getCompetitorNameById(competitorId)}</div>
-                                        <button onClick={() => setPlayerToRemove({competitorId, group})} className="opacity-0 group-hover/player:opacity-100 text-text-secondary/50 hover:text-red-500 transition-colors p-1">
+                                    <li key={competitorId} className="bg-tertiary/50 p-3 rounded-lg flex flex-wrap items-center justify-between gap-3">
+                                        <div className="text-sm font-medium break-words min-w-0">{getCompetitorNameById(competitorId)}</div>
+                                        <button type="button"
+                                            onClick={() => setPlayerToRemove({competitorId, group})}
+                                            aria-label={`Rimuovi ${getCompetitorNameById(competitorId)} dal girone ${group.name}`}
+                                            className="min-h-11 shrink-0 flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-3 py-2 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-accent">
                                             <TrashIcon className="w-4 h-4" />
+                                            Rimuovi dal girone
                                         </button>
                                     </li>
                                 ))}
@@ -544,9 +548,12 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
                         <p className="text-text-secondary mb-4">
                             Sei sicuro di voler rimuovere <strong>{getCompetitorNameById(playerToRemove.competitorId)}</strong> dal girone <strong>{playerToRemove.group.name}</strong>? Questa operazione rimuoverà anche le relative partite nel girone.
                         </p>
+                        <p className="text-text-secondary mb-4">
+                            {isPadel ? 'I giocatori restano' : 'Il giocatore resta'} nella lista dell’evento e nell’archivio globale. Gli account di accesso non vengono eliminati.
+                        </p>
                         <div className="flex justify-end gap-4">
                             <button onClick={() => setPlayerToRemove(null)} className="bg-tertiary px-4 py-2 rounded">Annulla</button>
-                            <button onClick={handleRemovePlayer} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">{isPadel ? 'Rimuovi Squadra' : 'Rimuovi Giocatore'}</button>
+                            <button onClick={handleRemovePlayer} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Conferma rimozione dal girone</button>
                         </div>
                     </div>
                 </div>
