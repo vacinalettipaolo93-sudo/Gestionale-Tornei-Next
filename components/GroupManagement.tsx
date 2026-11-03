@@ -459,9 +459,9 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
                                         <button type="button"
                                             onClick={() => setPlayerToRemove({competitorId, group})}
                                             aria-label={`Rimuovi ${getCompetitorNameById(competitorId)} dal girone ${group.name}`}
-                                            className="min-h-11 shrink-0 flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-3 py-2 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-accent">
+                                            title="Rimuovi dal girone"
+                                            className="h-11 w-11 shrink-0 flex items-center justify-center border border-red-500 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-accent">
                                             <TrashIcon className="w-4 h-4" />
-                                            Rimuovi dal girone
                                         </button>
                                     </li>
                                 ))}
