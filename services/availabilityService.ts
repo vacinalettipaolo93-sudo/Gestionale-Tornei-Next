@@ -13,6 +13,12 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { TOURNAMENT_VENUES, type TournamentVenueId } from "../utils/tournamentVenues";
+import {
+  getTournamentPeriodAvailabilityId,
+  isTournamentWeekendDate,
+  isTournamentAvailabilityPeriod,
+  type TournamentAvailabilityPeriodId,
+} from "../utils/tournamentAvailabilityPeriods";
 
 /**
  * Servizio disponibilità
@@ -70,6 +76,17 @@ export interface TournamentAvailabilityScope {
   tournamentId: string;
 }
 
+export interface TournamentPeriodAvailabilityRecord {
+  id?: string;
+  playerId: string;
+  eventId: string;
+  tournamentId: string;
+  date: string;
+  venueId: TournamentVenueId;
+  period: TournamentAvailabilityPeriodId;
+  isAvailable: true;
+}
+
 export async function setTournamentVenues(playerId: string, venueIds: TournamentVenueId[], scope: TournamentAvailabilityScope): Promise<void> {
   if (!playerId || !scope.eventId || !scope.tournamentId || venueIds.length === 0
     || venueIds.some(id => !TOURNAMENT_VENUES.some(venue => venue.id === id))) {
@@ -86,6 +103,32 @@ const AVAIL_COL = "availabilities"; // legacy
 const GLOBAL_COL = "availability_settings";
 const SLOT_PREF_COL = "slot_preferences";
 const DATE_UNAVAIL_COL = "date_unavailabilities";
+const TOURNAMENT_AVAIL_COL = "availabilities";
+
+export async function setTournamentPeriodAvailability(
+  playerId: string, date: string, venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId,
+  isAvailable: boolean, scope: TournamentAvailabilityScope,
+): Promise<void> {
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  if (!playerId || !scope.eventId || !scope.tournamentId
+    || !isTournamentWeekendDate(date)
+    || date < todayKey
+    || !TOURNAMENT_VENUES.some(venue => venue.id === venueId)
+    || !isTournamentAvailabilityPeriod(period)) {
+    throw new Error('Seleziona un giorno, un centro e una fascia oraria validi.');
+  }
+  const ref = doc(db, TOURNAMENT_AVAIL_COL,
+    getTournamentPeriodAvailabilityId(scope, playerId, date, venueId, period));
+  if (isAvailable) {
+    await setDoc(ref, {
+      playerId, ...scope, date, venueId, period, slot: period, isAvailable: true,
+      updatedAt: serverTimestamp(), createdAt: serverTimestamp(),
+    }, { merge: true });
+  } else {
+    await deleteDoc(ref);
+  }
+}
 
 // --- legacy: per-date availabilities (lasciamo le funzioni se servono) ---
 function docIdAvail(playerId: string, date: string, slot: string) {
