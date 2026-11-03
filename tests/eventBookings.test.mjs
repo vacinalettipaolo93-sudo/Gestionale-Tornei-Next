@@ -2,7 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,6 +29,14 @@ await build({
 const { getEventBookings } = await import(pathToFileURL(path.join(tempDir, 'utils/eventBookings.mjs')).href);
 const { default: BookedVenueSlots } = await import(pathToFileURL(path.join(tempDir, 'components/BookedVenueSlots.mjs')).href);
 const { default: TournamentVenueSlots } = await import(pathToFileURL(path.join(tempDir, 'components/TournamentVenueSlots.mjs')).href);
+test('obsolete booking tabs and legacy availability controls are absent from mounted views', () => {
+  const eventView = readFileSync('components/EventView.tsx', 'utf8');
+  assert.doesNotMatch(eventView, /TournamentVenueSlots|Prenota campo|TournamentVenueId/);
+  assert.match(eventView, /<BookedVenueSlots event=\{event\}/);
+  const availabilityView = readFileSync('components/AvailabilityTab.tsx', 'utf8');
+  assert.doesNotMatch(availabilityView, /<details|Slot storici|Vecchia preferenza|oldSlotsForDate|historicSlots/);
+  assert.match(availabilityView, /TOURNAMENT_AVAILABILITY_PERIODS\.map/);
+});
 const slot = (id = 's1', overrides = {}) => ({
   id, start: '2030-06-03T18:00:00Z', location: 'Canottieri Salò', venueId: 'canottieri-salo', field: 'Campo 1', ...overrides,
 });

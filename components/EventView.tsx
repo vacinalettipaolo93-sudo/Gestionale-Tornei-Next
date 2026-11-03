@@ -1,13 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { saveEventChanges } from '../services/eventDataService';
 import { type Event, type Player, type Tournament } from '../types';
-import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 import AdminMatchCounts from "./AdminMatchCounts";
 import BookedVenueSlots from './BookedVenueSlots';
 import EventPlayersView from './EventPlayersView';
 import { PlusIcon, TrashIcon } from './Icons';
 import RegolamentoGironiPanel from './RegolamentoGironiPanel';
-import TournamentVenueSlots from './TournamentVenueSlots';
 import { useSyncedDraft } from './usePersistenceAction';
 import { useSectionScroll } from './useSectionScroll';
 import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
@@ -28,7 +26,7 @@ interface EventViewProps {
 
 const makeId = () => `${Date.now()}${Math.floor(Math.random() * 10000)}`;
 
-type AdminEventSection = 'tournaments' | 'players' | 'rules' | 'groupRules' | 'matchControl' | 'bookedSlots' | TournamentVenueId;
+type AdminEventSection = 'tournaments' | 'players' | 'rules' | 'groupRules' | 'matchControl' | 'bookedSlots';
 
 const EventView: React.FC<EventViewProps> = ({
   event,
@@ -272,15 +270,6 @@ const EventView: React.FC<EventViewProps> = ({
             >
               Lista giocatori
             </button>
-            {TOURNAMENT_VENUES.map(venue => (
-              <button
-                key={venue.id}
-                className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === venue.id ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-                onClick={() => setActiveAdminSection(venue.id)}
-              >
-                Prenota campo {venue.name}
-              </button>
-            ))}
 
             <button
               className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'bookedSlots' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
@@ -447,9 +436,6 @@ const EventView: React.FC<EventViewProps> = ({
           setEvents={setEvents}
           isOrganizer={isOrganizer}
         />
-      )}
-      {isOrganizer && (activeAdminSection === 'canottieri-salo' || activeAdminSection === 'paitone-arena') && (
-        <TournamentVenueSlots key={event.id} event={event} venueId={activeAdminSection} />
       )}
       {isOrganizer && activeAdminSection === 'bookedSlots' && (
         <BookedVenueSlots event={event} />

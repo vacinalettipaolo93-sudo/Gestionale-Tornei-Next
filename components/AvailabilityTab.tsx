@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { type Event, type Group, type Player, type TimeSlot, type Tournament } from '../types';
+import { type Event, type Group, type Player, type Tournament } from '../types';
 import {
   removeDateUnavailability,
   setDateUnavailability,
@@ -7,11 +7,10 @@ import {
   setTournamentVenues,
 } from '../services/availabilityService';
 import { type TournamentAvailabilityScope } from '../services/availabilityService';
-import { getAvailabilityDateKey, getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
+import { getAvailabilityDateKey } from '../utils/tournamentAvailability';
 import { useTournamentAvailability } from './useTournamentAvailability';
 import { useSlotClock } from './useSlotClock';
-import { getSlotVenueId, TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
-import { hasTournamentSlotPreference, type TournamentAvailability } from '../utils/matchFinder';
+import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
 import {
   formatTournamentAvailabilityDate,
   getTournamentWeekends,
@@ -41,7 +40,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const now = useSlotClock(event);
   const scope: TournamentAvailabilityScope = { eventId: event.id, tournamentId: tournament.id };
   const availability = useTournamentAvailability(participantIds, scope);
-  const { loading, error, slotPrefMap, dateUnavailMap, venueMap, periodMap } = availability;
+  const { loading, error, dateUnavailMap, venueMap, periodMap } = availability;
   const savedVenues = loggedInPlayerId ? venueMap[loggedInPlayerId] : undefined;
   const selectedVenues = savedVenues ?? new Set<TournamentVenueId>(ALL_VENUES);
   const weekends = useMemo(() => getTournamentWeekends(new Date(now), 12), [now]);
@@ -52,11 +51,6 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const today = getAvailabilityDateKey(new Date(now).toISOString());
   const activeDate = selectedDate >= today ? selectedDate : getInitialDate(weekends);
   const myUnavail = loggedInPlayerId ? dateUnavailMap[loggedInPlayerId]?.has(activeDate) ?? false : false;
-  const legacySlots = getTournamentAvailabilitySlots(event, tournament, now).filter(slot => {
-    const venueId = getSlotVenueId(slot);
-    return !!venueId && selectedVenues.has(venueId);
-  });
-  const oldSlotsForDate = legacySlots.filter(slot => getAvailabilityDateKey(slot.start) === activeDate);
 
   const hasPeriod = (playerId: string, venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId) =>
     periodMap?.[playerId]?.some(entry => entry.date === activeDate
@@ -109,7 +103,6 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   if (loading) return <div>Caricamento disponibilità…</div>;
   if (error) return <p role="alert" className="text-red-400">{error}</p>;
 
-  const availabilityForMatcher: TournamentAvailability = availability;
   const formattedDate = formatTournamentAvailabilityDate(activeDate);
   const venueOptions = [
     { name: TOURNAMENT_VENUES[0].name, ids: [TOURNAMENT_VENUES[0].id] },
@@ -246,21 +239,10 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                       const periods = TOURNAMENT_AVAILABILITY_PERIODS
                         .filter(period => hasPeriod(player.id, venue.id, period.id))
                         .map(period => period.label);
-                      const historicSlots = legacySlots.filter(slot =>
-                        getSlotVenueId(slot) === venue.id && getAvailabilityDateKey(slot.start) === activeDate
-                        && hasTournamentSlotPreference(availabilityForMatcher, player.id, slot),
-                      );
                       return (
                         <td key={venue.id} className="p-3">
                           {unavailable ? <span className="text-red-400">Non disponibile</span> : (
-                            <>
-                              {periods.length ? periods.join(', ') : '—'}
-                              {historicSlots.length > 0 && (
-                                <span className="block text-xs text-text-secondary">
-                                  Slot storici: {historicSlots.map(slot => new Date(slot.start).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })).join(', ')}
-                                </span>
-                              )}
-                            </>
+                            periods.length ? periods.join(', ') : '—'
                           )}
                         </td>
                       );
@@ -279,29 +261,6 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
         </div>
       </section>
 
-      <details className="rounded-lg border border-tertiary bg-primary p-4">
-        <summary className="cursor-pointer font-semibold">Preferenze sui vecchi slot inseriti dall’amministratore</summary>
-        <p className="mt-3 text-sm text-text-secondary">
-          Gli slot esistenti e le relative preferenze sono conservati. Non vengono usati per il nuovo calendario: indica le disponibilità con le fasce qui sopra.
-        </p>
-        {oldSlotsForDate.length > 0 ? (
-          <ul className="mt-3 space-y-2">
-            {oldSlotsForDate.map(slot => {
-              const selected = loggedInPlayerId ? slotPrefMap[loggedInPlayerId]?.has(slot.id) ?? false : false;
-              return (
-                <li key={slot.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-tertiary pt-2">
-                  <span>{slot.location} · {new Date(slot.start).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })} · {slot.field || 'Campo non specificato'}</span>
-                  {loggedInPlayerId && (
-                    <span className={selected ? 'text-green-400' : 'text-text-secondary'}>
-                      {selected ? 'Vecchia preferenza salvata' : 'Nessuna vecchia preferenza'}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        ) : <p className="mt-3 text-sm text-text-secondary">Nessun vecchio slot in questa data.</p>}
-      </details>
     </div>
   );
 }
