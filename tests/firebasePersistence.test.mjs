@@ -109,7 +109,7 @@ function database(documents, { fail = false, beforeTransaction } = {}) {
         set: (ref, data) => pending.push({ type: 'set', ref, data }),
         delete: ref => pending.push({ type: 'delete', ref }),
       });
-      if (fail) throw new Error('Commit Firebase non riuscito.');
+      if (fail) throw fail instanceof Error ? fail : new Error('Commit Firebase non riuscito.');
       for (const write of pending) {
         if (write.type === 'update') assert.ok(store.has(write.ref.path), 'update must target an existing document');
         if (write.data) assert.deepEqual(write.data, JSON.parse(JSON.stringify(write.data)), 'no undefined/invalid Firestore fields');
@@ -139,6 +139,79 @@ const fixture = () => ({
   'players/p': player('p'), 'players/q': player('q'),
   'users/u': { username: 'Player p', playerId: 'p', password: 'test', role: 'participant' },
   ...Object.fromEntries(modes.map(mode => [`events/${mode}`, { ...event(mode), tournaments: [] }])),
+});
+
+test('archive Add button handles a 93-player event without changing accounts, groups or other events', async () => {
+  const existing = Array.from({ length: 93 }, (_, index) => player(`existing-${index}`));
+  const currentEvent = { ...event(), id: 'e', players: existing };
+  const newPlayer = player('new-player');
+  const documents = {
+    'events/e': currentEvent, 'events/other': event(), 'players/new-player': newPlayer,
+    'users/u': { username: 'Custom login', password: 'unchanged', playerId: newPlayer.id, role: 'participant' },
+  };
+  const db = database(documents);
+  const ui = uiHarness();
+  const props = { event: currentEvent, players: [newPlayer], isOrganizer: true, setEvents() {} };
+  const button = elements(ui.render(EventPlayersView, props)).find(element =>
+    element.type === 'button' && element.props.children === 'Aggiungi');
+  assert.ok(button);
+  await button.props.onClick();
+  // The click handler starts the async transaction without returning its promise.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(db.store.get('events/e').players.length, 94);
+  assert.deepEqual(db.store.get('events/e').players.at(-1), newPlayer);
+  assert.deepEqual(db.store.get('events/e').tournaments, currentEvent.tournaments);
+  assert.deepEqual(db.store.get('events/other'), documents['events/other']);
+  assert.deepEqual(db.store.get('users/u'), documents['users/u']);
+  assert.equal(db.writes.length, 1);
+  assert.match(elements(ui.render(EventPlayersView, props)).find(element =>
+    element.props?.role === 'status').props.children, /aggiunto/);
+});
+
+test('archive association exposes Firebase rejection details on mobile without partial writes', async () => {
+  for (const [code, message, expected] of [
+    ['permission-denied', 'Missing or insufficient permissions.', /non autorizza/],
+    ['unavailable', 'The service is unavailable.', /non è raggiungibile/],
+    ['invalid-argument', 'Document size exceeds maximum allowed size of 1048576 bytes.', /limite di dimensione/],
+    ['resource-exhausted', 'Quota exceeded.', /Quota exceeded/],
+    ['aborted', 'Too much contention.', /modificato contemporaneamente/],
+  ]) {
+    const currentEvent = { ...event(), id: 'e', players: [] };
+    const candidate = player('r');
+    const db = database({ 'events/e': currentEvent, 'players/r': candidate }, {
+      fail: Object.assign(new Error(message), { code }),
+    });
+    const ui = uiHarness();
+    const props = { event: currentEvent, players: [candidate], isOrganizer: true, setEvents() {} };
+    elements(ui.render(EventPlayersView, props)).find(element =>
+      element.type === 'button' && element.props.children === 'Aggiungi').props.onClick();
+    await new Promise(resolve => setImmediate(resolve));
+    const feedback = elements(ui.render(EventPlayersView, props)).find(element => element.props?.role === 'alert');
+    assert.ok(feedback);
+    assert.match(feedback.props.children, expected);
+    assert.ok(feedback.props.children.includes(message));
+    assert.ok(feedback.props.children.includes(code));
+    assert.deepEqual(db.store.get('events/e'), currentEvent);
+    assert.equal(db.writes.length, 0);
+  }
+});
+
+test('archive association distinguishes a deleted player from a deleted event', async () => {
+  for (const missing of ['events/e', 'players/r']) {
+    const currentEvent = { ...event(), id: 'e', players: [] };
+    const candidate = player('r');
+    const documents = { 'events/e': currentEvent, 'players/r': candidate };
+    delete documents[missing];
+    const db = database(documents);
+    const ui = uiHarness();
+    const props = { event: currentEvent, players: [candidate], isOrganizer: true, setEvents() {} };
+    elements(ui.render(EventPlayersView, props)).find(element =>
+      element.type === 'button' && element.props.children === 'Aggiungi').props.onClick();
+    await new Promise(resolve => setImmediate(resolve));
+    const feedback = elements(ui.render(EventPlayersView, props)).find(element => element.props?.role === 'alert');
+    assert.match(feedback.props.children, missing === 'events/e' ? /evento non esiste/ : /non è più nell’archivio/);
+    assert.equal(db.writes.length, 0);
+  }
 });
 
 test('admin event edits preserve concurrent bookings, results, new tournaments and players', async () => {

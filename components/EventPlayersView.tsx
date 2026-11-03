@@ -13,6 +13,22 @@ interface EventPlayersViewProps {
   isOrganizer: boolean;
 }
 
+function associationErrorMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message : '';
+  const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    ? error.code : '';
+  const reason = /(?:maximum|exceeds?|too large|larger than).*(?:size|bytes|1048576)|(?:document|entity).*(?:too large|1048576)/i.test(detail)
+    ? 'L’evento ha raggiunto il limite di dimensione di Firebase. Non creare un duplicato del giocatore: occorre ridurre i dati dell’evento.'
+    : code === 'permission-denied' || code === 'unauthenticated'
+      ? 'Firebase non autorizza il salvataggio. Verifica la sessione amministratore e le regole di accesso.'
+      : code === 'unavailable' || code === 'deadline-exceeded'
+        ? 'Firebase non è raggiungibile. Controlla la connessione e riprova.'
+        : code === 'aborted'
+          ? 'L’evento è stato modificato contemporaneamente. Ricarica e riprova.'
+          : 'Impossibile aggiungere il giocatore.';
+  return `${reason}${code ? ` Codice: ${code}.` : ''}${detail ? ` Dettaglio: ${detail}` : ''}`;
+}
+
 const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, setEvents, isOrganizer }) => {
   const [search, setSearch] = useState('');
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -49,9 +65,8 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
       const updatedPlayers = await runTransaction(db, async transaction => {
         const eventSnapshot = await transaction.get(eventRef);
         const playerSnapshot = await transaction.get(doc(db, 'players', player.id));
-        if (!eventSnapshot.exists() || !playerSnapshot.exists()) {
-          throw new Error('Evento o giocatore non trovato.');
-        }
+        if (!eventSnapshot.exists()) throw new Error('L’evento non esiste più. Ricarica la pagina.');
+        if (!playerSnapshot.exists()) throw new Error('Il giocatore non è più nell’archivio. Ricarica la lista prima di riprovare.');
 
         const profile = playerSnapshot.data();
         const eventPlayer: Player = {
@@ -79,7 +94,7 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
       }
     } catch (error) {
       console.error('Errore associazione giocatore all’evento', error);
-      setFeedback({ type: 'error', message: 'Impossibile aggiungere il giocatore. Riprova.' });
+      setFeedback({ type: 'error', message: associationErrorMessage(error) });
     } finally {
       setLoadingPlayerId(null);
     }
@@ -162,7 +177,7 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
       </div>
 
       {feedback && (
-        <p role="status" className={feedback.type === 'error' ? 'text-red-400' : 'text-green-400'}>
+        <p role={feedback.type === 'error' ? 'alert' : 'status'} className={feedback.type === 'error' ? 'text-red-400' : 'text-green-400'}>
           {feedback.message}
         </p>
       )}
