@@ -71,7 +71,7 @@ Gli slot già presenti in `tournament.timeSlots` e `event.globalTimeSlots`, le r
 
 ## Smartphone, navigazione e gestione risultati
 
-In **Gestione gironi**, ogni giocatore o squadra assegnata ha il pulsante rosso **Rimuovi dal girone**, sempre visibile anche su telefono. La conferma avvisa che vengono rimosse anche le relative partite del girone, mentre giocatori, archivio globale e account di accesso vengono conservati.
+In **Gestione gironi**, ogni giocatore o squadra assegnata ha un cestino con bordo rosso, senza scritta e sempre visibile anche su telefono. Il pulsante mantiene l'etichetta accessibile **Rimuovi dal girone**. La conferma avvisa che vengono rimosse anche le relative partite del girone, mentre giocatori, archivio globale e account di accesso vengono conservati.
 
 Quando un partecipante apre un evento, l'elenco scorre automaticamente fino alla scheda **Il mio torneo**, senza aprire il torneo o nascondere gli altri. Il riconoscimento usa l'assegnazione ai gironi, inclusa la coppia del giocatore nel Padel. Se il partecipante è in più tornei, viene raggiunto il primo nell'ordine dell'elenco; senza assegnazione e per gli organizzatori non viene effettuato lo scorrimento personale. Il posizionamento avviene una sola volta per ingresso nell'evento, anche se l'assegnazione arriva dopo il caricamento, senza ripetersi agli aggiornamenti Firebase.
 

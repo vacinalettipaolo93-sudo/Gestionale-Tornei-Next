@@ -49,7 +49,7 @@ const renderMatches = matches => renderToStaticMarkup(React.createElement(MatchL
   onEditResult() {}, onBookMatch() {}, onPlayerContact() {}, onRescheduleMatch() {}, onCancelBooking() {}, onDeleteResult() {},
 }));
 
-test('assigned players and Padel teams have always-visible labelled touch-sized removal buttons', () => {
+test('assigned players and Padel teams have always-visible red-outlined icon-only removal buttons', () => {
   for (const padel of [false, true]) {
     const group = { id: 'g', name: 'Girone A', playerIds: padel ? ['team'] : ['a'], matches: [] };
     const tournament = { id: 't', groups: [group], padelTeams: [{ id: 'team', name: 'Coppia A', player1Id: 'a', player2Id: 'b' }] };
@@ -59,8 +59,10 @@ test('assigned players and Padel teams have always-visible labelled touch-sized 
     }));
     const button = html.match(/<button[^>]*aria-label="Rimuovi [^"]+ dal girone Girone A"[^>]*>[\s\S]*?<\/button>/)?.[0];
     assert.ok(button);
-    assert.match(button, /Rimuovi dal girone/);
-    assert.match(button, /min-h-11/);
+    assert.match(button, /title="Rimuovi dal girone"/);
+    assert.match(button, /h-11 w-11/);
+    assert.match(button, /border border-red-500/);
+    assert.doesNotMatch(button, />\s*Rimuovi dal girone/);
     assert.doesNotMatch(button, /opacity-0|group-hover/);
     assert.match(button, /type="button"/);
   }
