@@ -417,7 +417,7 @@ test('calendar exposes only the next 12 Friday-Sunday weekends with stable local
   assert.deepEqual(weekends[11], { friday: '2030-03-22', saturday: '2030-03-23', sunday: '2030-03-24' });
   assert.ok(TOURNAMENT_AVAILABILITY_PERIODS.map(item => [item.id, item.startHour, item.endHour]).every(
     (item, index) => JSON.stringify(item) === JSON.stringify([
-      ['MORNING', 6, 12], ['AFTERNOON', 12, 18], ['EVENING', 18, 24],
+      ['MORNING', 8, 12], ['AFTERNOON', 12, 18], ['EVENING', 18, 22],
     ][index]),
   ));
 });
@@ -431,14 +431,14 @@ test('same date, centre and period are exact; same centre with different periods
   assert.equal(exact.length, 1);
   assert.equal(exact[0].compatibility, 'exact');
   assert.match(exact[0].commonTimes[0], /domenica 9 giugno/);
-  assert.match(exact[0].commonTimes[0], /Canottieri Salò · Sera \(18:00–24:00\)/);
+  assert.match(exact[0].commonTimes[0], /Canottieri Salò · Sera \(18:00–22:00\)/);
 
   const differentTime = periodsOnly({
     a: period('a', 'canottieri-salo', date, ['MORNING']),
     b: period('b', 'canottieri-salo', date, ['AFTERNOON']),
   });
   assert.equal(differentTime[0].compatibility, 'different-time');
-  assert.match(differentTime[0].commonTimes[0], /Mattina \(06:00–12:00\)/);
+  assert.match(differentTime[0].commonTimes[0], /Mattina \(08:00–12:00\)/);
   assert.match(differentTime[0].commonTimes[0], /Pomeriggio \(12:00–18:00\)/);
 });
 
@@ -498,6 +498,8 @@ test('new periods work without preloaded slots and can coordinate with a legacy 
     dateUnavailMap: {},
     periodMap: { a: period('a', 'canottieri-salo', '2030-06-07', ['EVENING']) },
   };
-  t.timeSlots.push(venueSlot('evening-slot', 'Canottieri Salò', '2030-06-07T20:00:00Z'));
+  t.timeSlots.push(venueSlot('evening-slot', 'Canottieri Salò', new Date(2030, 5, 7, 21).toISOString()));
   assert.equal(getTournamentMatchSuggestions(e, t, 'a', withLegacy, now)[0].compatibility, 'exact');
+  t.timeSlots[0] = venueSlot('evening-slot', 'Canottieri Salò', new Date(2030, 5, 7, 22).toISOString());
+  assert.equal(getTournamentMatchSuggestions(e, t, 'a', withLegacy, now)[0].compatibility, 'different-time');
 });

@@ -3,9 +3,9 @@ import { TOURNAMENT_VENUES, type TournamentVenueId } from './tournamentVenues';
 const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 export const TOURNAMENT_AVAILABILITY_PERIODS = [
-  { id: 'MORNING', label: 'Mattina', hours: '06:00–12:00', startHour: 6, endHour: 12 },
+  { id: 'MORNING', label: 'Mattina', hours: '08:00–12:00', startHour: 8, endHour: 12 },
   { id: 'AFTERNOON', label: 'Pomeriggio', hours: '12:00–18:00', startHour: 12, endHour: 18 },
-  { id: 'EVENING', label: 'Sera', hours: '18:00–24:00', startHour: 18, endHour: 24 },
+  { id: 'EVENING', label: 'Sera', hours: '18:00–22:00', startHour: 18, endHour: 22 },
 ] as const;
 
 export type TournamentAvailabilityPeriodId = typeof TOURNAMENT_AVAILABILITY_PERIODS[number]['id'];

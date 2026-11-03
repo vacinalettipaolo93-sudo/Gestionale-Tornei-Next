@@ -54,6 +54,24 @@ const TournamentView: React.FC<TournamentViewProps> = ({
     : loggedInPlayerId;
 
   const userGroup = tournament.groups.find(g => g.playerIds.includes(loggedInCompetitorId ?? ""));
+  const availabilityCompetitorIds = isOrganizer
+    ? tournament.groups.flatMap(group => group.playerIds)
+    : userGroup?.playerIds ?? [];
+  const availabilityPlayerIdSet = new Set<string>();
+  if (isPadel) {
+    const teams = getTournamentPadelTeams(tournament);
+    availabilityCompetitorIds.forEach(competitorId => {
+      const team = teams.find(item => item.id === competitorId);
+      if (team) {
+        availabilityPlayerIdSet.add(team.player1Id);
+        availabilityPlayerIdSet.add(team.player2Id);
+      }
+    });
+  } else {
+    availabilityCompetitorIds.forEach(competitorId => availabilityPlayerIdSet.add(competitorId));
+  }
+  const availabilityPlayerIds = [...availabilityPlayerIdSet]
+    .filter(id => event.players.some(player => player.id === id));
   const [selectedGroupId, setSelectedGroupId] = useState<string | undefined>(
     initialSelectedGroupId ?? (userGroup ? userGroup.id : tournament.groups[0]?.id)
   );
@@ -448,9 +466,9 @@ const TournamentView: React.FC<TournamentViewProps> = ({
             event={event}
             tournament={tournament}
             selectedGroup={{
-              id: `${tournament.id}-availability`,
-              name: 'Disponibilità torneo',
-              playerIds: event.players.map(player => player.id),
+              id: userGroup?.id ?? `${tournament.id}-availability`,
+              name: isOrganizer ? 'Torneo' : userGroup?.name ?? 'Nessun girone assegnato',
+              playerIds: availabilityPlayerIds,
               matches: [],
             }}
             loggedInPlayerId={loggedInPlayerId}
