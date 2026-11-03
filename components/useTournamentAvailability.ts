@@ -4,6 +4,12 @@ import { db } from '../firebase';
 import { type TournamentAvailability } from '../utils/matchFinder';
 import { type TournamentAvailabilityScope } from '../services/availabilityService';
 import { TOURNAMENT_VENUES } from '../utils/tournamentVenues';
+import {
+  isTournamentAvailabilityPeriod,
+  isTournamentAvailabilityVenue,
+  isTournamentWeekendDate,
+  type TournamentPeriodAvailability,
+} from '../utils/tournamentAvailabilityPeriods';
 
 interface AvailabilityState extends TournamentAvailability {
   key: string;
@@ -15,13 +21,15 @@ interface AvailabilityState extends TournamentAvailability {
 export function useTournamentAvailability(playerIds: string[], scope: TournamentAvailabilityScope) {
   const key = JSON.stringify({ ids: [...new Set(playerIds)].sort(), eventId: scope.eventId, tournamentId: scope.tournamentId });
   const [state, setState] = useState<AvailabilityState>({
-    key: '', slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, loading: true, error: null, pendingWrites: false,
+    key: '', slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, periodMap: {},
+    loading: true, error: null, pendingWrites: false,
   });
 
   useEffect(() => {
     const { ids, eventId, tournamentId }: { ids: string[] } & TournamentAvailabilityScope = JSON.parse(key);
     const slotPrefMap: TournamentAvailability['slotPrefMap'] = {};
     const dateUnavailMap: TournamentAvailability['dateUnavailMap'] = {};
+    const periodMap: NonNullable<TournamentAvailability['periodMap']> = {};
     const venueMap: NonNullable<TournamentAvailability['venueMap']> = {};
     const pending = new Set<string>();
     const pendingWrites = new Set<string>();
@@ -32,17 +40,21 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
       pending.add(`slot_preferences:${index}`);
       pending.add(`date_unavailabilities:${index}`);
       pending.add(`availability_settings:${index}`);
+      pending.add(`availabilities:${index}`);
     }
     const publish = () => {
       if (active) setState({
-        key, slotPrefMap: { ...slotPrefMap }, dateUnavailMap: { ...dateUnavailMap }, venueMap: { ...venueMap },
+        key, slotPrefMap: { ...slotPrefMap }, dateUnavailMap: { ...dateUnavailMap },
+        venueMap: { ...venueMap }, periodMap: Object.fromEntries(
+          Object.entries(periodMap).map(([id, entries]) => [id, [...entries]]),
+        ),
         loading: pending.size > 0 && !error, error, pendingWrites: pendingWrites.size > 0,
       });
     };
     publish();
     for (let index = 0; index < ids.length; index += 10) {
       const chunk = ids.slice(index, index + 10);
-      for (const collectionName of ['slot_preferences', 'date_unavailabilities', 'availability_settings']) {
+      for (const collectionName of ['slot_preferences', 'date_unavailabilities', 'availability_settings', 'availabilities']) {
         const subscriptionKey = `${collectionName}:${index}`;
         subscriptions.push(onSnapshot(
           query(collection(db, collectionName), where('playerId', 'in', chunk)),
@@ -62,6 +74,25 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
                 venueMap[record.playerId] = new Set(TOURNAMENT_VENUES
                   .filter(venue => Array.isArray(record.venueIds) && record.venueIds.includes(venue.id))
                   .map(venue => venue.id));
+              });
+              pending.delete(subscriptionKey);
+              publish();
+              return;
+            }
+            if (collectionName === 'availabilities') {
+              chunk.forEach(id => {
+                periodMap[id] = [];
+              });
+              snapshot.docs.forEach(document => {
+                const record = document.data();
+                if (!chunk.includes(record.playerId) || record.eventId !== eventId
+                  || record.tournamentId !== tournamentId
+                  || record.isAvailable !== true || !isTournamentWeekendDate(record.date)
+                  || !isTournamentAvailabilityVenue(record.venueId)
+                  || !isTournamentAvailabilityPeriod(record.period)) return;
+                (periodMap[record.playerId] as TournamentPeriodAvailability[]).push({
+                  date: record.date, venueId: record.venueId, period: record.period,
+                });
               });
               pending.delete(subscriptionKey);
               publish();
@@ -98,6 +129,7 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
   }, [key]);
 
   return state.key === key ? state : {
-    slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, loading: true, error: null, pendingWrites: false,
+    slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, periodMap: {},
+    loading: true, error: null, pendingWrites: false,
   };
 }

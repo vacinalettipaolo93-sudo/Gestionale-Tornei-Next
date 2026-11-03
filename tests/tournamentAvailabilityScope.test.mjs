@@ -25,13 +25,21 @@ const venuesSource = readFileSync(new URL('../utils/tournamentVenues.ts', import
 const venuesUrl = dataUrl(ts.transpileModule(venuesSource, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText);
+const periodsSource = readFileSync(new URL('../utils/tournamentAvailabilityPeriods.ts', import.meta.url), 'utf8');
+const periodsUrl = dataUrl(ts.transpileModule(periodsSource, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText.replace("'./tournamentVenues'", JSON.stringify(venuesUrl)));
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText
   .replace('"firebase/firestore"', JSON.stringify(firestoreUrl))
   .replace('"../utils/tournamentVenues"', JSON.stringify(venuesUrl))
+  .replace('"../utils/tournamentAvailabilityPeriods"', JSON.stringify(periodsUrl))
   .replace('import { db } from "../firebase";', 'const db = {};');
-const { setDateUnavailability, removeDateUnavailability, setTournamentVenues, setGlobalAvailability, getGlobalAvailabilitiesForPlayers } = await import(dataUrl(compiled));
+const {
+  setDateUnavailability, removeDateUnavailability, setTournamentVenues,
+  setGlobalAvailability, getGlobalAvailabilitiesForPlayers, setTournamentPeriodAvailability,
+} = await import(dataUrl(compiled));
 
 test('date exclusions have independent Firestore documents for each tournament and event', async () => {
   store.clear();
@@ -78,6 +86,46 @@ test('venue writes reject missing or unsupported venue choices without persistin
   store.clear();
   for (const venueIds of [[], ['unknown']]) {
     await assert.rejects(setTournamentVenues('player', venueIds, { eventId: 'e', tournamentId: 't' }), /centro di gioco valido/);
+  }
+  assert.equal(store.size, 0);
+});
+
+test('weekend day and centre periods persist independently for each tournament and can be removed', async () => {
+  store.clear();
+  const date = '2035-06-08';
+  const first = { eventId: 'event1', tournamentId: 't1' };
+  await setTournamentPeriodAvailability('player', date, 'canottieri-salo', 'MORNING', true, first);
+  await setTournamentPeriodAvailability('player', date, 'canottieri-salo', 'EVENING', true, first);
+  await setTournamentPeriodAvailability('player', date, 'paitone-arena', 'AFTERNOON', true, first);
+  await setTournamentPeriodAvailability('player', date, 'canottieri-salo', 'MORNING', true, { ...first, tournamentId: 't2' });
+  assert.equal(store.size, 4);
+  const morning = store.get('availabilities/event1_t1_player_2035-06-08_canottieri-salo_MORNING');
+  assert.deepEqual(
+    { playerId: morning.playerId, eventId: morning.eventId, tournamentId: morning.tournamentId,
+      date: morning.date, venueId: morning.venueId, period: morning.period, isAvailable: morning.isAvailable },
+    { playerId: 'player', ...first, date, venueId: 'canottieri-salo', period: 'MORNING', isAvailable: true },
+  );
+  await setTournamentPeriodAvailability('player', date, 'canottieri-salo', 'MORNING', false, first);
+  assert.equal(store.size, 3);
+  assert.ok(store.has('availabilities/event1_t1_player_2035-06-08_canottieri-salo_EVENING'));
+  assert.ok(store.has('availabilities/event1_t1_player_2035-06-08_paitone-arena_AFTERNOON'));
+  assert.ok(store.has('availabilities/event1_t2_player_2035-06-08_canottieri-salo_MORNING'));
+});
+
+test('period availability rejects invalid dates, old dates, periods, venues and incomplete tournament scope', async () => {
+  store.clear();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const oldDate = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+  for (const [player, date, venue, period, scope] of [
+    ['player', '2035-02-30', 'canottieri-salo', 'MORNING', { eventId: 'e', tournamentId: 't' }],
+    ['player', '2035-06-06', 'canottieri-salo', 'MORNING', { eventId: 'e', tournamentId: 't' }],
+    ['player', oldDate, 'canottieri-salo', 'MORNING', { eventId: 'e', tournamentId: 't' }],
+    ['player', '2035-06-08', 'unknown', 'MORNING', { eventId: 'e', tournamentId: 't' }],
+    ['player', '2035-06-08', 'canottieri-salo', 'NIGHT', { eventId: 'e', tournamentId: 't' }],
+    ['player', '2035-06-08', 'canottieri-salo', 'MORNING', { eventId: '', tournamentId: 't' }],
+  ]) {
+    await assert.rejects(setTournamentPeriodAvailability(player, date, venue, period, true, scope), /giorno, un centro e una fascia/);
   }
   assert.equal(store.size, 0);
 });

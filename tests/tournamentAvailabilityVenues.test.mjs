@@ -25,11 +25,14 @@ const firestoreUrl = dataUrl(`
   };
 `);
 const venuesUrl = dataUrl(compile(readFileSync(new URL('../utils/tournamentVenues.ts', import.meta.url), 'utf8')));
+const periodsUrl = dataUrl(compile(readFileSync(new URL('../utils/tournamentAvailabilityPeriods.ts', import.meta.url), 'utf8'))
+  .replace("'./tournamentVenues'", JSON.stringify(venuesUrl)));
 const source = compile(readFileSync(new URL('../components/useTournamentAvailability.ts', import.meta.url), 'utf8'))
   .replace("'react'", JSON.stringify(reactUrl))
   .replace("'firebase/firestore'", JSON.stringify(firestoreUrl))
   .replace("import { db } from '../firebase';", 'const db = {};')
-  .replace("'../utils/tournamentVenues'", JSON.stringify(venuesUrl));
+  .replace("'../utils/tournamentVenues'", JSON.stringify(venuesUrl))
+  .replace("'../utils/tournamentAvailabilityPeriods'", JSON.stringify(periodsUrl));
 const { useTournamentAvailability } = await import(dataUrl(source));
 const firestore = await import(firestoreUrl);
 const react = await import(reactUrl);
@@ -42,7 +45,7 @@ test('venue listener waits for all chunks, isolates scopes, updates choices in r
   firestore.subscriptions.length = 0;
   const ids = Array.from({ length: 11 }, (_, i) => `p${i}`);
   useTournamentAvailability(ids, scope);
-  assert.equal(firestore.subscriptions.length, 6);
+  assert.equal(firestore.subscriptions.length, 8);
   assert.ok(firestore.subscriptions.every(subscription => subscription.options.includeMetadataChanges));
   assert.equal(react.state.loading, true);
   for (const subscription of firestore.subscriptions.filter(s => s.name !== 'availability_settings')) emit(subscription);
@@ -68,6 +71,19 @@ test('venue listener waits for all chunks, isolates scopes, updates choices in r
   emit(first, [{ playerId: 'p0', ...scope, venueIds: ['canottieri-salo'] }]);
   assert.deepEqual([...react.state.venueMap.p0], ['canottieri-salo']);
   assert.equal(react.state.venueMap[secondPlayer].size, 2);
+  const firstPeriods = firestore.subscriptions.find(s => s.name === 'availabilities' && s.ids.includes('p0'));
+  emit(firstPeriods, [
+    { playerId: 'p0', ...scope, date: '2035-06-08', venueId: 'paitone-arena', period: 'MORNING', isAvailable: true },
+    { playerId: 'p0', ...scope, date: '2035-06-08', venueId: 'canottieri-salo', period: 'EVENING', isAvailable: true },
+    { playerId: 'p0', ...scope, date: '2035-06-08', venueId: 'canottieri-salo', period: 'unknown', isAvailable: true },
+    { playerId: 'p0', ...scope, eventId: 'different', date: '2035-06-08', venueId: 'canottieri-salo', period: 'MORNING', isAvailable: true },
+    { playerId: 'outsider', ...scope, date: '2035-06-08', venueId: 'paitone-arena', period: 'MORNING', isAvailable: true },
+  ]);
+  assert.deepEqual(react.state.periodMap.p0, [
+    { date: '2035-06-08', venueId: 'paitone-arena', period: 'MORNING' },
+    { date: '2035-06-08', venueId: 'canottieri-salo', period: 'EVENING' },
+  ]);
+  assert.equal(react.state.periodMap.outsider, undefined);
   emit(first);
   assert.equal(react.state.venueMap.p0, undefined);
   react.cleanup();
