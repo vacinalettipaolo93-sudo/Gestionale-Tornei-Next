@@ -71,29 +71,51 @@ const TournamentBookingModal: React.FC<{
         </p>
         <h4 className="font-bold">1. Scegli il centro e prenota il campo</h4>
         <p className="text-sm text-text-secondary">
-          Si apre il sito del circolo in una nuova scheda. Completa lì la prenotazione, poi torna in questa finestra
-          e registra lo stesso giorno e orario. Se hai già prenotato, puoi passare direttamente al punto 2.
+          Scegli il circolo, poi decidi se chiamare, contattarlo su WhatsApp o prenotare online.
+          Dopo aver ricevuto conferma del campo, registra qui lo stesso giorno e orario.
+          Se hai già prenotato, puoi passare direttamente al punto 2.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {TOURNAMENT_VENUES.map(item => (
-            <a
+            <button
               key={item.id}
-              href={item.bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={e => { if (saving) e.preventDefault(); else selectVenue(item.id); }}
-              aria-disabled={saving}
+              type="button"
+              onClick={() => selectVenue(item.id)}
+              disabled={saving}
+              aria-pressed={venueId === item.id}
               className={`block text-left border-2 rounded-xl bg-primary hover:bg-tertiary p-5 space-y-2 focus:ring-2 focus:ring-accent ${venueId === item.id ? 'border-accent' : 'border-tertiary'} ${saving ? 'pointer-events-none opacity-50' : ''}`}
-              aria-label={`Prenota a ${item.name} su ${item.bookingProvider} (nuova scheda)`}
+              aria-label={`Scegli ${item.name}`}
             >
               <span className="block text-xl font-bold text-accent">{item.name}</span>
-              <span className="block text-sm">Apri {item.bookingProvider} e prenota il campo</span>
-            </a>
+              <span className="block text-sm">Scegli come prenotare il campo</span>
+            </button>
           ))}
         </div>
+        {venue && (
+          <section aria-label={`Come prenotare presso ${venue.name}`} className="rounded-xl border border-tertiary p-4 space-y-3">
+            <h5 className="font-bold">{venue.name} · {venue.phone}</h5>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { label: 'Chiama il circolo', href: `tel:${venue.phone}`, newTab: false },
+                { label: 'Contatta su WhatsApp', href: `https://wa.me/${venue.phone.replace('+', '')}`, newTab: true },
+                { label: `Prenota online · ${venue.bookingProvider}`, href: venue.bookingUrl, newTab: true },
+              ].map(option => (
+                <a key={option.label} href={option.href}
+                  target={option.newTab ? '_blank' : undefined}
+                  rel={option.newTab ? 'noopener noreferrer' : undefined}
+                  onClick={e => { if (saving) e.preventDefault(); }}
+                  aria-disabled={saving}
+                  aria-label={`${option.label}${option.newTab ? ' (nuova scheda)' : ''}`}
+                  className={`rounded-lg bg-primary border border-tertiary p-3 text-center font-semibold hover:bg-tertiary focus:ring-2 focus:ring-accent ${saving ? 'pointer-events-none opacity-50' : ''}`}>
+                  {option.label}
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
         <p className="text-sm text-text-secondary">
-          L’app non prenota né verifica il campo su Playtomic o Wansport. Modifiche e annullamenti del campo
-          vanno effettuati anche sul sito del circolo.
+          L’app non prenota né verifica il campo: una chiamata, un messaggio WhatsApp o l’apertura del sito
+          non confermano una prenotazione. Modifiche e annullamenti del campo vanno concordati anche con il circolo.
         </p>
         <h4 className="font-bold">2. Torna qui e registra la partita</h4>
         {error && <p role="alert" className="text-red-400">{error}</p>}

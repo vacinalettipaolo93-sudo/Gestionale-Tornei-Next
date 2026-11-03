@@ -1,8 +1,8 @@
 import { type TimeSlot } from '../types';
 
 export const TOURNAMENT_VENUES = [
-  { id: 'canottieri-salo', name: 'Canottieri Salò', bookingProvider: 'Playtomic', bookingUrl: 'https://playtomic.com/it/clubs/tennis-salo-canottieri' },
-  { id: 'paitone-arena', name: 'Paitone Arena', bookingProvider: 'Wansport', bookingUrl: 'https://paitonearena.wansport.com/' },
+  { id: 'canottieri-salo', name: 'Canottieri Salò', phone: '+393397957909', bookingProvider: 'Playtomic', bookingUrl: 'https://playtomic.com/it/clubs/tennis-salo-canottieri' },
+  { id: 'paitone-arena', name: 'Paitone Arena', phone: '+393896556476', bookingProvider: 'Wansport', bookingUrl: 'https://paitonearena.wansport.com/' },
 ] as const;
 
 export type TournamentVenueId = typeof TOURNAMENT_VENUES[number]['id'];
