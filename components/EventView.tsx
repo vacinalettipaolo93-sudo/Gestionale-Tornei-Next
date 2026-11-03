@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { saveEventChanges } from '../services/eventDataService';
 import { type Event, type Player, type Tournament } from '../types';
 import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
@@ -10,6 +10,7 @@ import RegolamentoGironiPanel from './RegolamentoGironiPanel';
 import TournamentVenueSlots from './TournamentVenueSlots';
 import { useSyncedDraft } from './usePersistenceAction';
 import { useSectionScroll } from './useSectionScroll';
+import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
 
 interface EventViewProps {
   event: Event;
@@ -54,6 +55,37 @@ const EventView: React.FC<EventViewProps> = ({
   const [editTournamentLoading, setEditTournamentLoading] = useState<boolean>(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminEventSection>('tournaments');
   const sectionRef = useSectionScroll(`${event.id}:${activeAdminSection}`);
+  const myTournamentRef = useRef<HTMLDivElement>(null);
+  const scrolledEntryRef = useRef<string | null>(null);
+  const getPlayerGroupId = (tournament: Tournament) => {
+    if (!loggedInPlayerId) return undefined;
+    const competitorId = isPadelEvent(event)
+      ? getTeamForPlayer(getTournamentPadelTeams(tournament), loggedInPlayerId)?.id
+      : loggedInPlayerId;
+    return tournament.groups?.find(group => group.playerIds?.some(id =>
+      id === loggedInPlayerId || id === competitorId,
+    ))?.id;
+  };
+  const myTournamentId = event.tournaments?.find(tournament => getPlayerGroupId(tournament))?.id;
+
+  useEffect(() => {
+    const entryKey = JSON.stringify([event.id, loggedInPlayerId, isOrganizer]);
+    if (scrolledEntryRef.current !== entryKey) scrolledEntryRef.current = null;
+    if (isOrganizer || !loggedInPlayerId || !myTournamentId || scrolledEntryRef.current === entryKey) return;
+    let scrollFrame: number | undefined;
+    // Let the page/section entry scroll finish before positioning the personal card.
+    const frame = requestAnimationFrame(() => {
+      scrollFrame = requestAnimationFrame(() => {
+        if (!myTournamentRef.current) return;
+        myTournamentRef.current.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant' });
+        scrolledEntryRef.current = entryKey;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
+    };
+  }, [event.id, loggedInPlayerId, isOrganizer, myTournamentId]);
 
   useEffect(() => {
     if (!isOrganizer) return;
@@ -199,13 +231,6 @@ const EventView: React.FC<EventViewProps> = ({
     return { total, completed };
   };
 
-  // helper: find player's group id in a tournament (if any)
-  const getPlayerGroupId = (t: Tournament, playerId?: string) => {
-    if (!playerId) return undefined;
-    const g = (t.groups || []).find(gr => (gr.playerIds || []).includes(playerId));
-    return g?.id;
-  };
-
   return (
     <div ref={sectionRef} className="min-w-0 scroll-mt-4">
       <div className="bg-primary p-6 rounded-xl shadow-lg mb-6">
@@ -298,8 +323,8 @@ const EventView: React.FC<EventViewProps> = ({
             const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
             // Determina se il giocatore loggato è assegnato a questo torneo (in uno dei suoi gironi)
-            const isMyTournament = !!(loggedInPlayerId && (tournament.groups || []).some(g => (g.playerIds || []).includes(loggedInPlayerId)));
-            const myGroupId = getPlayerGroupId(tournament, loggedInPlayerId);
+            const myGroupId = getPlayerGroupId(tournament);
+            const isMyTournament = myGroupId !== undefined;
 
             // conditional classes for highlight
             const cardBase = 'p-4 rounded-xl flex flex-col justify-between transition-all duration-300';
@@ -310,7 +335,7 @@ const EventView: React.FC<EventViewProps> = ({
             const titleClass = `text-xl font-bold mb-2 ${isMyTournament ? 'text-white' : 'text-accent'}`;
 
             return (
-              <div key={tournament.id} className={cardClasses}>
+              <div key={tournament.id} ref={!isOrganizer && tournament.id === myTournamentId ? myTournamentRef : undefined} className={`${cardClasses} scroll-mt-4`}>
                 <div>
                   <div className="flex justify-between items-start">
                     <h3 className={titleClass}>{tournament.name}</h3>
