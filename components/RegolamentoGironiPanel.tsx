@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { type Event, type Tournament, type Group } from "../types";
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import { saveEventChanges } from '../services/eventDataService';
+import { type Event, type Tournament } from "../types";
+import { PersistenceFeedback, usePersistenceAction, useSyncedDraft } from './usePersistenceAction';
 
 interface RegolamentoGironiPanelProps {
   event: Event;
@@ -14,56 +14,46 @@ const RegolamentoGironiPanel: React.FC<RegolamentoGironiPanelProps> = ({
   tournament,
   setEvents,
 }) => {
+    const persistence = usePersistenceAction();
   const [selectedGroupId, setSelectedGroupId] = useState(tournament.groups[0]?.id ?? "");
   const selectedGroup = tournament.groups.find((g) => g.id === selectedGroupId);
-  const [rulesText, setRulesText] = useState<string>(selectedGroup?.rules ?? "");
-  const [loading, setLoading] = useState(false);
+  const [rulesText, setRulesText, baselineRules] = useSyncedDraft(selectedGroup?.rules, `${tournament.id}:${selectedGroupId}`);
+  const loading = persistence.saving;
   const [successMsg, setSuccessMsg] = useState("");
 
   useEffect(() => {
-    setRulesText(selectedGroup?.rules ?? "");
     setSuccessMsg("");
-  }, [selectedGroupId, tournament.groups]);
+  }, [selectedGroupId]);
 
   const handleChangeGroup = (groupId: string) => {
     setSelectedGroupId(groupId);
-    const group = tournament.groups.find((g) => g.id === groupId);
-    setRulesText(group?.rules ?? "");
   };
 
   const handleSaveRules = async () => {
-    if (!selectedGroup) return;
+    await persistence.run(async () => {
+      if (!selectedGroup) return;
 
-    setLoading(true);
-    setSuccessMsg("");
-    const updatedGroups = tournament.groups.map((g) =>
-      g.id === selectedGroup.id ? { ...g, rules: rulesText } : g
-    );
+      setSuccessMsg("");
+      const updatedGroups = tournament.groups.map((g) =>
+        g.id === selectedGroup.id ? { ...g, rules: rulesText ?? '' } : g
+      );
 
-    setEvents((prevEvents) =>
-      prevEvents.map((e) => {
-        if (e.id !== event.id) return e;
-        return {
-          ...e,
-          tournaments: e.tournaments.map((t) =>
-            t.id === tournament.id ? { ...t, groups: updatedGroups } : t
-          ),
-        };
-      })
-    );
+      await saveEventChanges({
+        ...event, tournaments: event.tournaments.map(t => t.id === tournament.id ? {
+          ...t, groups: t.groups.map(g => g.id === selectedGroup.id ? { ...g, rules: baselineRules } : g),
+        } : t),
+      }, {
+        tournaments: event.tournaments.map((t) =>
+          t.id === tournament.id ? { ...t, groups: updatedGroups } : t
+        ),
+      });
 
-    await updateDoc(doc(db, "events", event.id), {
-      tournaments: event.tournaments.map((t) =>
-        t.id === tournament.id ? { ...t, groups: updatedGroups } : t
-      ),
+      setSuccessMsg("Regolamento salvato per il girone!");
     });
-
-    setLoading(false);
-    setSuccessMsg("Regolamento salvato per il girone!");
   };
 
-  if (!selectedGroup) return null;
-  return (
+  if (!selectedGroup) return <React.Fragment><PersistenceFeedback persistence={persistence} />{null}</React.Fragment>;
+  return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
     <div className="mb-8 bg-secondary p-6 rounded-xl shadow-md">
       <h3 className="text-xl mb-4 font-bold text-accent">Regolamenti Gironi</h3>
       <div className="flex items-center gap-4 mb-4">
@@ -81,7 +71,7 @@ const RegolamentoGironiPanel: React.FC<RegolamentoGironiPanelProps> = ({
         </select>
       </div>
       <textarea
-        value={rulesText}
+        value={rulesText ?? ''}
         onChange={(e) => setRulesText(e.target.value)}
         className="w-full rounded bg-primary border p-3 min-h-[120px] mb-3"
         placeholder="Scrivi qui il regolamento per il girone selezionato..."
@@ -96,7 +86,7 @@ const RegolamentoGironiPanel: React.FC<RegolamentoGironiPanelProps> = ({
       </button>
       {successMsg && <div className="text-green-600 mt-3 font-semibold">{successMsg}</div>}
     </div>
-  );
+  )}</React.Fragment>;
 };
 
 export default RegolamentoGironiPanel;

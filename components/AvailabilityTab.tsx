@@ -51,6 +51,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const { loading, error, slotPrefMap, dateUnavailMap, venueMap } = availability;
   const selectedVenues = loggedInPlayerId ? venueMap[loggedInPlayerId] : new Set(TOURNAMENT_VENUES.map(venue => venue.id));
   const [savingVenues, setSavingVenues] = useState(false);
+  const [savingPreference, setSavingPreference] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const futureSlots = allFutureSlots.filter(slot => {
     const venueId = getSlotVenueId(slot);
@@ -108,10 +109,11 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
 
   // Toggle slot preference: write then local snapshot will update from listener
   async function toggleMySlot(slotId: string) {
-    if (!loggedInPlayerId) return;
+    if (!loggedInPlayerId || savingPreference) return;
     const mySet = slotPrefMap[loggedInPlayerId] ?? new Set<string>();
     const has = mySet.has(slotId);
     setSaveError(null);
+    setSavingPreference(true);
     try {
       if (!has) {
         await setSlotPreference(loggedInPlayerId, slotId, true);
@@ -122,15 +124,18 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     } catch (err) {
       console.error("Errore salvataggio preferenza slot:", err);
       setSaveError("Impossibile salvare la preferenza. Riprova.");
+    } finally {
+      setSavingPreference(false);
     }
   }
 
   // Toggle date unavailability: write then listener updates state
   async function toggleMyDateUnavail(dateKey: string) {
-    if (!loggedInPlayerId) return;
+    if (!loggedInPlayerId || savingPreference) return;
     const mySet = dateUnavailMap[loggedInPlayerId] ?? new Set<string>();
     const has = mySet.has(dateKey);
     setSaveError(null);
+    setSavingPreference(true);
     try {
       if (!has) {
         await setDateUnavailability(loggedInPlayerId, dateKey, true, availabilityScope);
@@ -140,6 +145,8 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     } catch (err) {
       console.error("Errore salvataggio non-disponibilità per data:", err);
       setSaveError("Impossibile salvare la non disponibilità. Riprova.");
+    } finally {
+      setSavingPreference(false);
     }
   }
 
@@ -159,6 +166,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
         Non aver escluso una data non equivale ad aver dichiarato disponibilità.
       </p>
       {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
+      {(savingPreference || availability.pendingWrites) && <p role="status">Salvataggio disponibilità su Firebase...</p>}
       <fieldset className="space-y-3">
         <legend className="font-bold mb-3">1. Dove vuoi giocare?</legend>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -225,6 +233,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                       {loggedInPlayerId ? (
                         <button
                           onClick={() => toggleMyDateUnavail(dk)}
+                          disabled={savingPreference}
                           className={`px-3 py-2 rounded ${myUnavail ? 'bg-red-600 text-white' : 'bg-tertiary text-text-primary'}`}
                         >
                           {myUnavail ? 'Rimuovi: Non disponibile' : 'Segna Non disponibile'}
@@ -338,7 +347,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                         {loggedInPlayerId ? (
                           <button
                             onClick={() => toggleMySlot(slotId)}
-                            disabled={myDateUnavail}
+                            disabled={myDateUnavail || savingPreference}
                             className={`px-3 py-2 rounded font-semibold ${myPref ? 'bg-green-600 text-white' : 'bg-tertiary text-text-primary'} ${myDateUnavail ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             {myPref ? 'Segnato: Voglio giocare' : 'Segna: Voglio giocare'}

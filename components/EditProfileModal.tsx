@@ -1,16 +1,17 @@
+import { doc, runTransaction } from "firebase/firestore";
 import React, { useMemo, useRef, useState } from 'react';
-import { type User, type Event } from '../types';
-import { FaceSmileIcon, LinkIcon, PhotoIcon, TrashIcon } from './Icons';
-import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
+import { type Event, type User } from '../types';
 import {
-  createInitialsAvatar,
-  validateImageFile,
+  ACCEPTED_IMAGE_EXTENSIONS,
   compressImageToDataUrl,
+  createInitialsAvatar,
   getCharacterAvatarPresets,
   isSafeAvatarSource,
-  ACCEPTED_IMAGE_EXTENSIONS,
+  validateImageFile,
 } from '../utils/avatar';
+import { updatePlayerEverywhere } from '../utils/updatePlayerProfile';
+import { FaceSmileIcon, LinkIcon, PhotoIcon, TrashIcon } from './Icons';
 
 interface EditProfileModalProps {
   user: User;
@@ -24,7 +25,7 @@ interface EditProfileModalProps {
 
 type ConfirmAction = 'password' | 'avatar';
 
-const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUsers, events, setEvents, onClose, initialTab = 'password' }) => {
+const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, events, onClose, initialTab = 'password' }) => {
   const [activeTab, setActiveTab] = useState<'password' | 'avatar'>(initialTab);
 
   // Password state
@@ -33,6 +34,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUse
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   // Avatar state
   const [imageUrl, setImageUrl] = useState('');
@@ -59,12 +61,18 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUse
     return null;
   };
 
-  // Persist password change to Firestore users collection (keeps existing local setUsers)
   const savePasswordChange = async () => {
+    if (passwordSaving) return;
+    setPasswordSaving(true);
+    setPasswordError('');
     try {
-      setUsers(prevUsers =>
-        prevUsers.map(u => (u.id === user.id ? { ...u, password: newPassword } : u))
-      );
+      await runTransaction(db, async transaction => {
+        const ref = doc(db, 'users', user.id);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists()) throw new Error('Utente non trovato.');
+        if (snapshot.data().password !== oldPassword) throw new Error('La vecchia password non è corretta o è stata modificata.');
+        transaction.update(ref, { password: newPassword });
+      });
 
       try {
         localStorage.removeItem("password");
@@ -74,17 +82,6 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUse
         // ignore
       }
 
-      const usersRef = collection(db, "users");
-      const q = user.playerId
-        ? query(usersRef, where("playerId", "==", user.playerId))
-        : query(usersRef, where("username", "==", user.username));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        await Promise.all(snap.docs.map(d => updateDoc(doc(db, "users", d.id), { password: newPassword })));
-      } else {
-        console.warn("[EditProfileModal] Nessun documento utente trovato in Firestore per aggiornare la password.");
-      }
-
       setPasswordSuccess('Password modificata con successo!');
       setOldPassword('');
       setNewPassword('');
@@ -92,7 +89,9 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUse
       setTimeout(() => setPasswordSuccess(''), 2000);
     } catch (err: any) {
       console.error("Errore aggiornamento password:", err);
-      setPasswordError('Errore durante il salvataggio della nuova password.');
+      setPasswordError(err instanceof Error ? err.message : 'Errore durante il salvataggio della nuova password.');
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -108,53 +107,9 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUse
     setConfirmAction('password');
   };
 
-  /** Persists the new avatar both in local state and in Firestore. */
   const persistAvatar = async (newAvatar: string) => {
-    if (!user.playerId) return;
-
-    // 1. Update local events state immediately for responsive UI
-    setEvents(prevEvents =>
-      prevEvents.map(event => ({
-        ...event,
-        players: event.players.map(p =>
-          p.id === user.playerId ? { ...p, avatar: newAvatar } : p
-        ),
-      }))
-    );
-
-    // 2. Persist to Firestore players collection
-    try {
-      const playersRef = collection(db, "players");
-      const q = query(playersRef, where("__name__", "==", user.playerId));
-      // Try by doc id first
-      await updateDoc(doc(db, "players", user.playerId), { avatar: newAvatar });
-    } catch {
-      // Fallback: find by id field if document id differs
-      try {
-        const playersRef = collection(db, "players");
-        const snap = await getDocs(query(playersRef, where("id", "==", user.playerId)));
-        if (!snap.empty) {
-          await Promise.all(snap.docs.map(d => updateDoc(d.ref, { avatar: newAvatar })));
-        }
-      } catch (err) {
-        console.error("[EditProfileModal] Impossibile aggiornare avatar in players:", err);
-      }
-    }
-
-    // 3. Persist to Firestore events (embedded players array)
-    try {
-      const affectedEvents = events.filter(ev => ev.players.some(p => p.id === user.playerId));
-      await Promise.all(
-        affectedEvents.map(ev => {
-          const updatedPlayers = ev.players.map(p =>
-            p.id === user.playerId ? { ...p, avatar: newAvatar } : p
-          );
-          return updateDoc(doc(db, "events", ev.id), { players: updatedPlayers });
-        })
-      );
-    } catch (err) {
-      console.error("[EditProfileModal] Impossibile aggiornare avatar negli eventi:", err);
-    }
+    if (!user.playerId) throw new Error('Nessun giocatore collegato al profilo.');
+    await updatePlayerEverywhere(user.playerId, { avatar: newAvatar });
   };
 
   const showAvatarSuccess = (msg = 'Avatar aggiornato!') => {
@@ -295,7 +250,7 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ user, users, setUse
               {passwordSuccess && <p className="text-sm text-green-400">{passwordSuccess}</p>}
               <div className="flex justify-end gap-4 pt-2">
                 <button type="button" onClick={onClose} className="bg-tertiary hover:bg-tertiary/80 text-text-primary font-bold py-2 px-4 rounded-lg transition-colors">Chiudi</button>
-                <button type="submit" className="bg-highlight hover:bg-highlight/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">Salva Modifiche</button>
+                <button type="submit" disabled={passwordSaving} className="bg-highlight hover:bg-highlight/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">{passwordSaving ? 'Salvataggio...' : 'Salva Modifiche'}</button>
               </div>
             </form>
           )}

@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { type Event, type Tournament, type Player, type PlayoffBracket, type PlayoffMatch, type Match } from '../types';
-import { calculateStandings } from '../utils/standings';
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from 'react';
+import { saveEventChanges } from '../services/eventDataService';
+import { type Event, type Match, type Player, type PlayoffBracket, type PlayoffMatch, type Tournament } from '../types';
 import { getTournamentCompetitors } from '../utils/padel';
+import { calculateStandings } from '../utils/standings';
+import { PersistenceFeedback, usePersistenceAction } from './usePersistenceAction';
 
 interface ConsolationBracketProps {
     event: Event;
@@ -31,9 +31,10 @@ function buildLeagueMatchFromConsolationPlayoffMatch(pm: PlayoffMatch): Match | 
 }
 
 const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tournament, setEvents, isOrganizer, loggedInPlayerId, onEditResult }) => {
+    const persistence = usePersistenceAction();
     const [view, setView] = useState<'setup' | 'bracket'>(tournament.consolationBracket?.isGenerated ? 'bracket' : 'setup');
     const competitors = useMemo(() => getTournamentCompetitors(event, tournament), [event.players, tournament]);
-    
+
     const qualifiers = useMemo(() => {
         const allQualifiers: { playerId: string, rank: number, fromGroup: string, groupName: string }[] = [];
         tournament.groups.forEach(group => {
@@ -57,7 +58,7 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
         if (numPlayers < 2) return 0;
         return 2 ** Math.ceil(Math.log2(numPlayers));
     }, [qualifiers]);
-    
+
     const [firstRoundAssignments, setFirstRoundAssignments] = useState<(string | null)[]>([]);
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
@@ -68,7 +69,7 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
     }, [qualifiers, view, bracketSize]);
 
     const getPlayer = (id: string | null): Player | null => id ? competitors.find(p => p.id === id) ?? null : null;
-    
+
     const handleAssignmentChange = (slotIndex: number, value: string) => {
         setFirstRoundAssignments(prev => {
             const newAssignments = [...prev];
@@ -82,111 +83,113 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
     };
 
     const handleGenerateBracket = async () => {
-        if (firstRoundAssignments.some(a => a === null)) {
-            alert("Per favore, riempi tutti gli slot del primo turno.");
-            return;
-        }
-
-        const newMatches: PlayoffMatch[] = [];
-        const numRounds = Math.log2(bracketSize);
-        let matchCounter = 0;
-        
-        for (let round = 1; round <= numRounds; round++) {
-            const matchesInRound = bracketSize / (2 ** round);
-            for (let i = 0; i < matchesInRound; i++) {
-                newMatches.push({
-                    id: `con-m-${matchCounter}`, round, matchIndex: matchCounter,
-                    player1Id: null, player2Id: null, score1: null, score2: null,
-                    winnerId: null, nextMatchId: null,
-                });
-                matchCounter++;
+        await persistence.run(async () => {
+            if (firstRoundAssignments.some(a => a === null)) {
+                alert("Per favore, riempi tutti gli slot del primo turno.");
+                return;
             }
-        }
-        
-        newMatches.forEach(match => {
-            if (match.round < numRounds) {
-                const roundMatches = newMatches.filter(m => m.round === match.round);
-                const matchIndexInRound = roundMatches.findIndex(m => m.id === match.id);
-                const nextRoundMatches = newMatches.filter(m => m.round === match.round + 1);
-                const nextMatch = nextRoundMatches[Math.floor(matchIndexInRound / 2)];
-                if (nextMatch) match.nextMatchId = nextMatch.id;
-            }
-        });
-        
-        const firstRoundMatches = newMatches.filter(m => m.round === 1);
-        firstRoundMatches.forEach((match, i) => {
-            const p1Id = firstRoundAssignments[i * 2];
-            const p2Id = firstRoundAssignments[i * 2 + 1];
-            const isP1Bye = p1Id === 'BYE';
-            const isP2Bye = p2Id === 'BYE';
-            match.player1Id = isP1Bye ? null : p1Id;
-            match.player2Id = isP2Bye ? null : p2Id;
 
-            let winnerId: string | null = null;
-            if (!isP1Bye && isP2Bye) winnerId = p1Id;
-            if (isP1Bye && !isP2Bye) winnerId = p2Id;
-            
-            if (winnerId) {
-                match.winnerId = winnerId;
-                const nextMatch = newMatches.find(m => m.id === match.nextMatchId);
-                if (nextMatch) {
-                    const matchIndexInRound = firstRoundMatches.findIndex(m => m.id === match.id);
-                    if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
-                    else nextMatch.player2Id = winnerId;
+            const newMatches: PlayoffMatch[] = [];
+            const numRounds = Math.log2(bracketSize);
+            let matchCounter = 0;
+
+            for (let round = 1; round <= numRounds; round++) {
+                const matchesInRound = bracketSize / (2 ** round);
+                for (let i = 0; i < matchesInRound; i++) {
+                    newMatches.push({
+                        id: `con-m-${matchCounter}`, round, matchIndex: matchCounter,
+                        player1Id: null, player2Id: null, score1: null, score2: null,
+                        winnerId: null, nextMatchId: null,
+                    });
+                    matchCounter++;
                 }
             }
+
+            newMatches.forEach(match => {
+                if (match.round < numRounds) {
+                    const roundMatches = newMatches.filter(m => m.round === match.round);
+                    const matchIndexInRound = roundMatches.findIndex(m => m.id === match.id);
+                    const nextRoundMatches = newMatches.filter(m => m.round === match.round + 1);
+                    const nextMatch = nextRoundMatches[Math.floor(matchIndexInRound / 2)];
+                    if (nextMatch) match.nextMatchId = nextMatch.id;
+                }
+            });
+
+            const firstRoundMatches = newMatches.filter(m => m.round === 1);
+            firstRoundMatches.forEach((match, i) => {
+                const p1Id = firstRoundAssignments[i * 2];
+                const p2Id = firstRoundAssignments[i * 2 + 1];
+                const isP1Bye = p1Id === 'BYE';
+                const isP2Bye = p2Id === 'BYE';
+                match.player1Id = isP1Bye ? null : p1Id;
+                match.player2Id = isP2Bye ? null : p2Id;
+
+                let winnerId: string | null = null;
+                if (!isP1Bye && isP2Bye) winnerId = p1Id;
+                if (isP1Bye && !isP2Bye) winnerId = p2Id;
+
+                if (winnerId) {
+                    match.winnerId = winnerId;
+                    const nextMatch = newMatches.find(m => m.id === match.nextMatchId);
+                    if (nextMatch) {
+                        const matchIndexInRound = firstRoundMatches.findIndex(m => m.id === match.id);
+                        if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
+                        else nextMatch.player2Id = winnerId;
+                    }
+                }
+            });
+
+            const finalBracket: PlayoffBracket = {
+                matches: newMatches, isGenerated: true,
+                finalId: newMatches.find(m => m.round === numRounds)?.id ?? null,
+                bronzeFinalId: null,
+            };
+
+            // genera anche le partite "league"
+            const consolationMatches: Match[] = [];
+            for (const pm of newMatches) {
+                const m = buildLeagueMatchFromConsolationPlayoffMatch(pm);
+                if (m) consolationMatches.push(m);
+            }
+
+            const updatedTournaments = event.tournaments.map(t =>
+                t.id === tournament.id
+                    ? { ...t, consolationBracket: finalBracket, consolationMatches }
+                    : t
+            );
+
+            await saveEventChanges(event, { tournaments: updatedTournaments });
+
+            setView('bracket');
         });
-        
-        const finalBracket: PlayoffBracket = {
-            matches: newMatches, isGenerated: true,
-            finalId: newMatches.find(m => m.round === numRounds)?.id ?? null,
-            bronzeFinalId: null,
-        };
-
-        // genera anche le partite "league"
-        const consolationMatches: Match[] = [];
-        for (const pm of newMatches) {
-          const m = buildLeagueMatchFromConsolationPlayoffMatch(pm);
-          if (m) consolationMatches.push(m);
-        }
-
-        const updatedTournaments = event.tournaments.map(t =>
-          t.id === tournament.id
-            ? { ...t, consolationBracket: finalBracket, consolationMatches }
-            : t
-        );
-
-        setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-        await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-        setView('bracket');
     };
 
     const handleResetBracket = async () => {
-        const resetBracket: PlayoffBracket = {
-          ...(tournament.consolationBracket ?? { matches: [], isGenerated: false, finalId: null, bronzeFinalId: null }),
-          isGenerated: false,
-          matches: [],
-          finalId: null,
-          bronzeFinalId: null,
-        };
+        await persistence.run(async () => {
+            const resetBracket: PlayoffBracket = {
+                ...(tournament.consolationBracket ?? { matches: [], isGenerated: false, finalId: null, bronzeFinalId: null }),
+                isGenerated: false,
+                matches: [],
+                finalId: null,
+                bronzeFinalId: null,
+            };
 
-        const updatedTournaments = event.tournaments.map(t =>
-          t.id === tournament.id
-            ? { ...t, consolationBracket: resetBracket, consolationMatches: [] }
-            : t
-        );
+            const updatedTournaments = event.tournaments.map(t =>
+                t.id === tournament.id
+                    ? { ...t, consolationBracket: resetBracket, consolationMatches: [] }
+                    : t
+            );
 
-        setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-        await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
+            await saveEventChanges(event, { tournaments: updatedTournaments });
 
-        setView('setup');
-        setIsResetModalOpen(false);
+            setView('setup');
+            setIsResetModalOpen(false);
+        });
     };
 
     if (view === 'setup') {
-        if (!isOrganizer) return <p className="text-text-secondary text-center">Il tabellone di consolazione non è stato ancora generato.</p>;
-        
+        if (!isOrganizer) return <React.Fragment><PersistenceFeedback persistence={persistence} />{<p className="text-text-secondary text-center">Il tabellone di consolazione non è stato ancora generato.</p>}</React.Fragment>;
+
         const unassignedPlayers = qualifiers.filter(q => !firstRoundAssignments.includes(q.playerId));
         const numByesAvailable = bracketSize - qualifiers.length;
         const byesAssigned = firstRoundAssignments.filter(a => a === 'BYE').length;
@@ -216,13 +219,13 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
                 </select>
             );
         };
-        
-        return (
+
+        return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
             <div className="bg-secondary p-6 rounded-xl shadow-lg max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
                     <h3 className="text-xl font-bold mb-2 text-accent">Costruttore Tabellone Consolazione</h3>
                     <p className="text-text-secondary mb-6">Assegna manualmente i giocatori qualificati agli slot del primo turno.</p>
-                    
+
                     <div className="space-y-4">
                         {bracketSize > 0 ? Array.from({ length: bracketSize / 2 }).map((_, index) => (
                              <div key={index} className="bg-primary/50 p-4 rounded-lg flex items-center gap-4">
@@ -275,12 +278,12 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
                     </div>
                 </div>
             </div>
-        );
+        )}</React.Fragment>;
     }
-    
+
     const { matches } = tournament.consolationBracket!;
     const maxRound = Math.max(0, ...matches.map(m => m.round));
-    
+
     const getRoundName = (round: number) => {
         if (round === maxRound) return "Finale";
         if (round === maxRound - 1) return "Semifinali";
@@ -305,7 +308,7 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
         const p2 = getPlayer(match.player2Id);
         const canEdit = match.player1Id && match.player2Id
           && (isOrganizer || !!loggedInPlayerId && [match.player1Id, match.player2Id].includes(loggedInPlayerId));
-        
+
         return (
             <div className={`bg-secondary p-2 rounded-lg w-full`}>
                 <div className="flex justify-between items-center text-sm">
@@ -332,8 +335,8 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
 
     const finalMatch = matches.find(m => m.round === maxRound);
     const winner = finalMatch?.winnerId ? getPlayer(finalMatch.winnerId) : null;
-    
-    return (
+
+    return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
         <div className="bg-secondary p-2 md:p-6 rounded-xl shadow-lg">
              <div className="text-center mb-6">
                  <h3 className="text-2xl font-bold text-accent">Tabellone di Consolazione</h3>
@@ -381,7 +384,7 @@ const ConsolationBracket: React.FC<ConsolationBracketProps> = ({ event, tourname
                 </div>
             )}
         </div>
-    );
+    )}</React.Fragment>;
 };
 
 export default ConsolationBracket;

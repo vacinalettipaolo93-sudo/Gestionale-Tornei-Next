@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { type Event, type Player, type Tournament, type Match } from '../types';
-import RegolamentoGironiPanel from './RegolamentoGironiPanel';
-import EventPlayersView from './EventPlayersView';
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
-import { TrashIcon, PlusIcon } from './Icons';
-import AdminMatchCounts from "./AdminMatchCounts";
-import TournamentVenueSlots from './TournamentVenueSlots';
-import BookedVenueSlots from './BookedVenueSlots';
-import { useSectionScroll } from './useSectionScroll';
+import React, { useEffect, useState } from 'react';
+import { saveEventChanges } from '../services/eventDataService';
+import { type Event, type Player, type Tournament } from '../types';
 import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVenues';
+import AdminMatchCounts from "./AdminMatchCounts";
+import BookedVenueSlots from './BookedVenueSlots';
+import EventPlayersView from './EventPlayersView';
+import { PlusIcon, TrashIcon } from './Icons';
+import RegolamentoGironiPanel from './RegolamentoGironiPanel';
+import TournamentVenueSlots from './TournamentVenueSlots';
+import { useSyncedDraft } from './usePersistenceAction';
+import { useSectionScroll } from './useSectionScroll';
 
 interface EventViewProps {
   event: Event;
@@ -37,7 +37,7 @@ const EventView: React.FC<EventViewProps> = ({
   loggedInPlayerId,
   players,
 }) => {
-  const [rulesDraft, setRulesDraft] = useState(event.rules ?? "");
+  const [rulesDraft, setRulesDraft, baselineRules] = useSyncedDraft(event.rules, event.id);
   const [rulesEdit, setRulesEdit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
@@ -56,10 +56,6 @@ const EventView: React.FC<EventViewProps> = ({
   const sectionRef = useSectionScroll(`${event.id}:${activeAdminSection}`);
 
   useEffect(() => {
-    setRulesDraft(event.rules ?? "");
-  }, [event]);
-
-  useEffect(() => {
     if (!isOrganizer) return;
     setActiveAdminSection('tournaments');
   }, [event.id, isOrganizer]);
@@ -67,19 +63,15 @@ const EventView: React.FC<EventViewProps> = ({
   const handleSaveRules = async () => {
     setLoading(true);
     try {
-      setEvents(prev =>
-        prev.map(ev =>
-          ev.id === event.id ? { ...ev, rules: rulesDraft } : ev
-        )
-      );
-      await updateDoc(doc(db, "events", event.id), {
-        rules: rulesDraft
+      await saveEventChanges({ ...event, rules: baselineRules }, {
+        rules: rulesDraft ?? ''
       });
       setSuccessMsg("Regolamento salvato!");
       setRulesEdit(false);
       setTimeout(() => setSuccessMsg(""), 2500);
     } catch (err) {
       console.error("Errore salvataggio regolamento", err);
+      alert(err instanceof Error ? err.message : 'Regolamento non salvato. Riprova.');
     } finally {
       setLoading(false);
     }
@@ -131,17 +123,7 @@ const EventView: React.FC<EventViewProps> = ({
         settings: { ...defaultTournamentSettings } as any,
       };
 
-      // update local state immediately
-      setEvents(prevEvents =>
-        prevEvents.map(ev =>
-          ev.id === event.id
-            ? { ...ev, tournaments: [...(ev.tournaments ?? []), newTournament] }
-            : ev
-        )
-      );
-
-      // save to Firestore
-      await updateDoc(doc(db, "events", event.id), {
+      await saveEventChanges(event, {
         tournaments: (event.tournaments ?? []).concat(newTournament)
       });
 
@@ -159,16 +141,12 @@ const EventView: React.FC<EventViewProps> = ({
     if (!confirm("Sei sicuro di voler eliminare questo torneo?")) return;
     try {
       const updatedTournaments = (event.tournaments ?? []).filter(t => t.id !== tournamentId);
-      setEvents(prevEvents =>
-        prevEvents.map(ev =>
-          ev.id === event.id ? { ...ev, tournaments: updatedTournaments } : ev
-        )
-      );
-      await updateDoc(doc(db, "events", event.id), {
+      await saveEventChanges(event, {
         tournaments: updatedTournaments
       });
     } catch (err) {
       console.error("Errore eliminazione torneo", err);
+      alert(err instanceof Error ? err.message : 'Torneo non eliminato. Riprova.');
     }
   };
 
@@ -192,13 +170,9 @@ const EventView: React.FC<EventViewProps> = ({
         t.id === editingTournament.id ? { ...t, name: editTournamentName.trim() } : t
       );
 
-      // update local state
-      setEvents(prevEvents =>
-        prevEvents.map(ev => ev.id === event.id ? { ...ev, tournaments: updatedTournaments } : ev)
-      );
-
-      // persist on Firestore
-      await updateDoc(doc(db, "events", event.id), {
+      await saveEventChanges({
+        ...event, tournaments: event.tournaments.map(t => t.id === editingTournament.id ? { ...t, name: editingTournament.name } : t),
+      }, {
         tournaments: updatedTournaments
       });
 
@@ -473,7 +447,7 @@ const EventView: React.FC<EventViewProps> = ({
         {rulesEdit ? (
           <div>
             <textarea
-              value={rulesDraft}
+              value={rulesDraft ?? ''}
               onChange={(e) => setRulesDraft(e.target.value)}
               className="w-full rounded bg-primary border p-3 min-h-[120px] mb-3"
               placeholder="Scrivi qui il regolamento per il girone selezionato..."

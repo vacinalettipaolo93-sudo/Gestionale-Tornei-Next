@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { type Event, type Tournament, type Group, type Player, type Match, type PadelTeam } from '../types';
+import React, { useMemo, useState } from 'react';
+import { saveEventChanges } from '../services/eventDataService';
+import { type Event, type Group, type Match, type PadelTeam, type Player, type Tournament } from '../types';
 import { TrashIcon } from './Icons';
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
+import { PersistenceFeedback, usePersistenceAction } from './usePersistenceAction';
 
 interface GroupManagementProps {
     event: Event;
@@ -14,6 +14,12 @@ interface GroupManagementProps {
 const makeId = () => `${Date.now()}${Math.floor(Math.random() * 10000)}`;
 
 const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, setEvents, isOrganizer }) => {
+    const persistence = usePersistenceAction();
+    const withGroupBaseline = (group: Group): Event => ({
+        ...event,
+        tournaments: event.tournaments.map(t => t.id === tournament.id
+            ? { ...t, groups: t.groups.map(g => g.id === group.id ? group : g) } : t),
+    });
     const isPadel = event.eventType === 'tournament_padel';
     const teams = Array.isArray(tournament.padelTeams) ? tournament.padelTeams : [];
     const getTeamById = (teamId: string) => teams.find(team => team.id === teamId);
@@ -72,161 +78,132 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
 
     // ASSEGNA GIOCATORI E AGGIORNA FIRESTORE
     const handleSaveAssignments = async () => {
-        if (!assigningGroup) return;
+        await persistence.run(async () => {
+            if (!assigningGroup) return;
 
-        const updatedGroups = tournament.groups.map(g =>
-            g.id === assigningGroup.id ? { ...g, playerIds: Array.from(selectedPlayers) } : g
-        );
+            const updatedGroups = tournament.groups.map(g =>
+                g.id === assigningGroup.id ? { ...g, playerIds: Array.from(selectedPlayers) } : g
+            );
 
-        setEvents(prevEvents => prevEvents.map(e => {
-            if (e.id !== event.id) return e;
-            return {
-                ...e,
-                tournaments: e.tournaments.map(t => {
-                    if (t.id !== tournament.id) return t;
-                    return {
-                        ...t,
-                        groups: updatedGroups
-                    };
-                })
-            };
-        }));
+            await saveEventChanges(withGroupBaseline(assigningGroup), {
+                tournaments: event.tournaments.map(t =>
+                    t.id === tournament.id ? { ...t, groups: updatedGroups } : t
+                )
+            });
 
-        await updateDoc(doc(db, "events", event.id), {
-            tournaments: event.tournaments.map(t =>
-                t.id === tournament.id ? { ...t, groups: updatedGroups } : t
-            )
+            setAssigningGroup(null);
         });
-
-        setAssigningGroup(null);
     };
 
     // RIMUOVI GIOCATORE E AGGIORNA FIRESTORE
     const handleRemovePlayer = async () => {
-        if(!playerToRemove) return;
-        const { competitorId, group } = playerToRemove;
+        await persistence.run(async () => {
+            if (!playerToRemove) return;
+            const { competitorId, group } = playerToRemove;
 
-        const updatedGroups = tournament.groups.map(g => {
-            if (g.id !== group.id) return g;
-            return {
-                ...g,
-                playerIds: g.playerIds.filter(id => id !== competitorId),
-                matches: g.matches.filter(m => m.player1Id !== competitorId && m.player2Id !== competitorId)
-            }
+            const updatedGroups = tournament.groups.map(g => {
+                if (g.id !== group.id) return g;
+                return {
+                    ...g,
+                    playerIds: g.playerIds.filter(id => id !== competitorId),
+                    matches: g.matches.filter(m => m.player1Id !== competitorId && m.player2Id !== competitorId)
+                }
+            });
+
+            await saveEventChanges(withGroupBaseline(group), {
+                tournaments: event.tournaments.map(t =>
+                    t.id === tournament.id ? { ...t, groups: updatedGroups } : t
+                )
+            });
+
+            setPlayerToRemove(null);
         });
-
-        setEvents(prevEvents => prevEvents.map(e => {
-            if (e.id !== event.id) return e;
-            return {
-                ...e,
-                tournaments: e.tournaments.map(t => {
-                    if (t.id !== tournament.id) return t;
-                    return {
-                        ...t,
-                        groups: updatedGroups
-                    };
-                })
-            };
-        }));
-
-        await updateDoc(doc(db, "events", event.id), {
-            tournaments: event.tournaments.map(t =>
-                t.id === tournament.id ? { ...t, groups: updatedGroups } : t
-            )
-        });
-
-        setPlayerToRemove(null);
     }
 
     // GENERA PARTITE E AGGIORNA FIRESTORE
     const handleGenerateMatches = async (group: Group) => {
-        if (group.playerIds.length < 2) {
-            alert(isPadel ? "Sono necessarie almeno 2 squadre per generare le partite." : "Sono necessari almeno 2 giocatori per generare le partite.");
-            return;
-        }
+        await persistence.run(async () => {
+            if (group.playerIds.length < 2) {
+                alert(isPadel ? "Sono necessarie almeno 2 squadre per generare le partite." : "Sono necessari almeno 2 giocatori per generare le partite.");
+                return;
+            }
 
-        // Determine if this group must be double round-robin (andata e ritorno)
-        const isDouble = !!(tournament.settings?.groupRoundRobin && tournament.settings.groupRoundRobin[group.id]);
+            // Determine if this group must be double round-robin (andata e ritorno)
+            const isDouble = !!(tournament.settings?.groupRoundRobin && tournament.settings.groupRoundRobin[group.id]);
 
-        const newMatches: Match[] = [];
-        for (let i = 0; i < group.playerIds.length; i++) {
-            for (let j = i + 1; j < group.playerIds.length; j++) {
-                // match A vs B
-                newMatches.push({
-                    id: `m${Date.now()}${i}${j}`,
-                    player1Id: group.playerIds[i],
-                    player2Id: group.playerIds[j],
-                    score1: null,
-                    score2: null,
-                    status: 'pending',
-                });
-                // if double round-robin, add reverse fixture
-                if (isDouble) {
-                  newMatches.push({
-                      id: `m${Date.now()}${j}${i}_r`,
-                      player1Id: group.playerIds[j],
-                      player2Id: group.playerIds[i],
-                      score1: null,
-                      score2: null,
-                      status: 'pending',
-                  });
+            const newMatches: Match[] = [];
+            for (let i = 0; i < group.playerIds.length; i++) {
+                for (let j = i + 1; j < group.playerIds.length; j++) {
+                    // match A vs B
+                    newMatches.push({
+                        id: `m${Date.now()}${i}${j}`,
+                        player1Id: group.playerIds[i],
+                        player2Id: group.playerIds[j],
+                        score1: null,
+                        score2: null,
+                        status: 'pending',
+                    });
+                    // if double round-robin, add reverse fixture
+                    if (isDouble) {
+                        newMatches.push({
+                            id: `m${Date.now()}${j}${i}_r`,
+                            player1Id: group.playerIds[j],
+                            player2Id: group.playerIds[i],
+                            score1: null,
+                            score2: null,
+                            status: 'pending',
+                        });
+                    }
                 }
             }
-        }
 
-        const updatedGroups = tournament.groups.map(g =>
-            g.id === group.id ? { ...g, matches: newMatches } : g
-        );
+            const updatedGroups = tournament.groups.map(g =>
+                g.id === group.id ? { ...g, matches: newMatches } : g
+            );
 
-        setEvents(prevEvents => prevEvents.map(e => {
-            if (e.id !== event.id) return e;
-            return {
-                ...e,
-                tournaments: e.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
-                };
-            }));
-
-        await updateDoc(doc(db, "events", event.id), {
-            tournaments: event.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
+            await saveEventChanges(event, {
+                tournaments: event.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
+            });
         });
     };
 
     const handleCreatePadelTeam = async () => {
-        if (!isPadel) return;
-        const trimmedTeamName = newTeamName.trim();
-        setTeamError(null);
+        await persistence.run(async () => {
+            if (!isPadel) return;
+            const trimmedTeamName = newTeamName.trim();
+            setTeamError(null);
 
-        if (!trimmedTeamName) {
-            setTeamError('Inserisci il nome squadra.');
-            return;
-        }
-        if (!newTeamPlayer1Id || !newTeamPlayer2Id) {
-            setTeamError('Seleziona Giocatore 1 e Giocatore 2.');
-            return;
-        }
-        if (newTeamPlayer1Id === newTeamPlayer2Id) {
-            setTeamError('Giocatore 1 e Giocatore 2 devono essere diversi.');
-            return;
-        }
+            if (!trimmedTeamName) {
+                setTeamError('Inserisci il nome squadra.');
+                return;
+            }
+            if (!newTeamPlayer1Id || !newTeamPlayer2Id) {
+                setTeamError('Seleziona Giocatore 1 e Giocatore 2.');
+                return;
+            }
+            if (newTeamPlayer1Id === newTeamPlayer2Id) {
+                setTeamError('Giocatore 1 e Giocatore 2 devono essere diversi.');
+                return;
+            }
 
-        const newTeam: PadelTeam = {
-            id: makeId(),
-            name: trimmedTeamName,
-            player1Id: newTeamPlayer1Id,
-            player2Id: newTeamPlayer2Id,
-        };
+            const newTeam: PadelTeam = {
+                id: makeId(),
+                name: trimmedTeamName,
+                player1Id: newTeamPlayer1Id,
+                player2Id: newTeamPlayer2Id,
+            };
 
-        const updatedTeams = [...teams, newTeam];
-        const updatedTournaments = event.tournaments.map(t =>
-            t.id === tournament.id ? { ...t, padelTeams: updatedTeams } : t
-        );
+            const updatedTeams = [...teams, newTeam];
+            const updatedTournaments = event.tournaments.map(t =>
+                t.id === tournament.id ? { ...t, padelTeams: updatedTeams } : t
+            );
 
-        setEvents(prevEvents => prevEvents.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-        await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
+            await saveEventChanges(event, { tournaments: updatedTournaments });
 
-        setNewTeamName('');
-        setNewTeamPlayer1Id('');
-        setNewTeamPlayer2Id('');
+            setNewTeamName('');
+            setNewTeamPlayer1Id('');
+            setNewTeamPlayer2Id('');
+        });
     };
 
     // ---------- Nuove funzioni: Aggiungi / Modifica / Elimina Gironi ----------
@@ -251,15 +228,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
 
             const updatedGroups = [...tournament.groups, newGroup];
 
-            setEvents(prevEvents => prevEvents.map(e => {
-                if (e.id !== event.id) return e;
-                return {
-                    ...e,
-                    tournaments: e.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
-                };
-            }));
-
-            await updateDoc(doc(db, "events", event.id), {
+            await saveEventChanges(event, {
                 tournaments: event.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
             });
 
@@ -311,15 +280,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
 
             const updatedGroups = tournament.groups.map(g => g.id === updatedGroup.id ? updatedGroup : g);
 
-            setEvents(prevEvents => prevEvents.map(e => {
-                if (e.id !== event.id) return e;
-                return {
-                    ...e,
-                    tournaments: e.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
-                };
-            }));
-
-            await updateDoc(doc(db, "events", event.id), {
+            await saveEventChanges(withGroupBaseline(original), {
                 tournaments: event.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
             });
 
@@ -346,15 +307,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
         try {
             const updatedGroups = tournament.groups.filter(g => g.id !== groupToDelete.id);
 
-            setEvents(prevEvents => prevEvents.map(e => {
-                if (e.id !== event.id) return e;
-                return {
-                    ...e,
-                    tournaments: e.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
-                };
-            }));
-
-            await updateDoc(doc(db, "events", event.id), {
+            await saveEventChanges(withGroupBaseline(groupToDelete), {
                 tournaments: event.tournaments.map(t => t.id === tournament.id ? { ...t, groups: updatedGroups } : t)
             });
 
@@ -393,7 +346,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
             .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
     }, [event.players, assignSearchQuery, isPadel, teams]);
 
-    return (
+    return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
         <div className="space-y-6">
             {isPadel && (
                 <div className="bg-secondary p-4 rounded-xl shadow-md">
@@ -675,7 +628,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
                 </div>
             )}
         </div>
-    );
+    )}</React.Fragment>;
 };
 
 export default GroupManagement;

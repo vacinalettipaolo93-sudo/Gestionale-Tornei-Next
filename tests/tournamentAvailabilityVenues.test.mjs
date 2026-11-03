@@ -18,8 +18,8 @@ const firestoreUrl = dataUrl(`
   export const collection = (_db, name) => ({ name });
   export const where = (_field, _operation, ids) => ids;
   export const query = (collection, ids) => ({ ...collection, ids });
-  export const onSnapshot = (query, success, error) => {
-    const subscription = { ...query, success, error, stopped: false };
+  export const onSnapshot = (query, options, success, error) => {
+    const subscription = { ...query, options, success, error, stopped: false };
     subscriptions.push(subscription);
     return () => { subscription.stopped = true; };
   };
@@ -34,13 +34,16 @@ const { useTournamentAvailability } = await import(dataUrl(source));
 const firestore = await import(firestoreUrl);
 const react = await import(reactUrl);
 const scope = { eventId: 'e1', tournamentId: 't1' };
-const emit = (subscription, records = []) => subscription.success({ docs: records.map(record => ({ data: () => record })) });
+const emit = (subscription, records = [], hasPendingWrites = false) => subscription.success({
+  docs: records.map(record => ({ data: () => record })), metadata: { hasPendingWrites },
+});
 
 test('venue listener waits for all chunks, isolates scopes, updates choices in realtime and removes listeners', () => {
   firestore.subscriptions.length = 0;
   const ids = Array.from({ length: 11 }, (_, i) => `p${i}`);
   useTournamentAvailability(ids, scope);
   assert.equal(firestore.subscriptions.length, 6);
+  assert.ok(firestore.subscriptions.every(subscription => subscription.options.includeMetadataChanges));
   assert.equal(react.state.loading, true);
   for (const subscription of firestore.subscriptions.filter(s => s.name !== 'availability_settings')) emit(subscription);
   assert.equal(react.state.loading, true);
@@ -69,6 +72,28 @@ test('venue listener waits for all chunks, isolates scopes, updates choices in r
   assert.equal(react.state.venueMap.p0, undefined);
   react.cleanup();
   assert.ok(firestore.subscriptions.every(s => s.stopped));
+});
+
+test('availability snapshots publish only acknowledged writes, including pending deletion and rollback', () => {
+  firestore.subscriptions.length = 0;
+  useTournamentAvailability(['p0'], scope);
+  firestore.subscriptions.forEach(subscription => emit(subscription));
+  const slots = firestore.subscriptions.find(subscription => subscription.name === 'slot_preferences');
+  const preference = { playerId: 'p0', slotId: 'slot', isPreferred: true };
+  emit(slots, [preference], true);
+  assert.equal(react.state.pendingWrites, true);
+  assert.equal(react.state.slotPrefMap.p0.size, 0);
+  emit(slots, [preference]);
+  assert.equal(react.state.pendingWrites, false);
+  assert.equal(react.state.slotPrefMap.p0.has('slot'), true);
+  emit(slots, [], true);
+  assert.equal(react.state.slotPrefMap.p0.has('slot'), true, 'unconfirmed deletion must not be published');
+  emit(slots, [preference]);
+  assert.equal(react.state.pendingWrites, false);
+  assert.equal(react.state.slotPrefMap.p0.has('slot'), true, 'failed deletion keeps the saved selection');
+  emit(slots);
+  assert.equal(react.state.slotPrefMap.p0.size, 0, 'acknowledged deletion propagates immediately');
+  react.cleanup();
 });
 
 test('venue listener errors surface instead of returning success-shaped availability', () => {
