@@ -449,7 +449,7 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
-    return <>{syncNotice}<Login users={users} onLoginSuccess={handleLoginSuccess} /></>;
+    return <>{syncNotice}<Login users={users} players={players} onLoginSuccess={handleLoginSuccess} /></>;
   }
 
   const renderContent = () => {

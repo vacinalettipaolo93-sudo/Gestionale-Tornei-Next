@@ -11,14 +11,28 @@ const temporary = mkdtempSync(path.join(os.tmpdir(), 'firebase-persistence-'));
 after(() => {
   rmSync(temporary, { recursive: true });
   delete globalThis.__persistenceDb;
+  delete globalThis.__playerAccessUi;
 });
 await build({
-  entryPoints: ['utils/documentChanges.ts', 'services/eventDataService.ts', 'services/playerDataService.ts', 'utils/updatePlayerProfile.ts'],
+  entryPoints: ['utils/documentChanges.ts', 'services/eventDataService.ts', 'services/playerDataService.ts', 'utils/updatePlayerProfile.ts', 'utils/playerLogin.ts',
+    'components/EventPlayersView.tsx', 'components/Login.tsx', 'components/AdminUsersModal.tsx'],
   outdir: temporary, outbase: '.', bundle: true, platform: 'node', format: 'esm', outExtension: { '.js': '.mjs' },
   plugins: [{
     name: 'fake-firestore',
     setup(plugin) {
       plugin.onResolve({ filter: /(^firebase\/firestore$|\/firebase$)/ }, args => ({ path: args.path, namespace: 'fake' }));
+      plugin.onResolve({ filter: /^react(\/jsx-runtime)?$/ }, args => ({ path: args.path, namespace: 'react-fake' }));
+      plugin.onLoad({ filter: /.*/, namespace: 'react-fake' }, () => ({
+        contents: `
+          export const jsx = (type, props) => ({ type, props });
+          export const jsxs = jsx;
+          export const Fragment = 'fragment';
+          export const useState = initial => globalThis.__playerAccessUi.useState(initial);
+          export const useEffect = effect => globalThis.__playerAccessUi.effects.push(effect);
+          export const useMemo = callback => callback();
+          export default { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }) };
+        `,
+      }));
       plugin.onLoad({ filter: /.*/, namespace: 'fake' }, args => ({
         contents: args.path === 'firebase/firestore' ? `
           export const collection = (_db, name) => ({ path: name });
@@ -31,6 +45,7 @@ await build({
           export const query = (ref, ...conditions) => ({ ...ref, conditions });
           export const getDocs = ref => globalThis.__persistenceDb.query(ref);
           export const runTransaction = (_db, callback) => globalThis.__persistenceDb.transact(callback);
+          export const updateDoc = (ref, data) => globalThis.__persistenceDb.transact(transaction => transaction.update(ref, data));
         ` : 'export const db = {};',
       }));
     },
@@ -40,7 +55,36 @@ const load = name => import(pathToFileURL(path.join(temporary, `${name}.mjs`)).h
 const { mergeDocumentChanges, firestoreData } = await load('utils/documentChanges');
 const { saveEventChanges } = await load('services/eventDataService');
 const { updatePlayerEverywhere } = await load('utils/updatePlayerProfile');
-const { createPlayerWithAccount, associatePlayerWithEvent, deletePlayerEverywhere, removePlayerFromRanking } = await load('services/playerDataService');
+const { createPlayerWithAccount, associatePlayerWithEvent, deletePlayerEverywhere, removePlayerFromRanking, synchronizePlayerAccounts } = await load('services/playerDataService');
+const { findLoginUser } = await load('utils/playerLogin');
+const { default: EventPlayersView } = await load('components/EventPlayersView');
+const { default: Login } = await load('components/Login');
+const { default: AdminUsersModal } = await load('components/AdminUsersModal');
+
+function uiHarness(overrides = {}) {
+  const values = [];
+  let index = 0;
+  const ui = {
+    effects: [],
+    useState(initial) {
+      const id = index++;
+      if (!(id in values)) values[id] = id in overrides ? overrides[id] : typeof initial === 'function' ? initial() : initial;
+      return [values[id], next => { values[id] = typeof next === 'function' ? next(values[id]) : next; }];
+    },
+    render(component, props) {
+      index = 0;
+      globalThis.__playerAccessUi = ui;
+      return component(props);
+    },
+  };
+  return ui;
+}
+
+function elements(tree) {
+  if (!tree || typeof tree !== 'object') return [];
+  if (Array.isArray(tree)) return tree.flatMap(elements);
+  return [tree, ...elements(tree.props?.children)];
+}
 
 function database(documents, { fail = false, beforeTransaction } = {}) {
   const store = new Map(Object.entries(structuredClone(documents)));
@@ -93,7 +137,7 @@ const event = (eventType = 'tournament_singolare') => ({
 const modes = ['tournament_singolare', 'tournament_padel', 'ranking_singolare', 'ranking_padel_individuale'];
 const fixture = () => ({
   'players/p': player('p'), 'players/q': player('q'),
-  'users/u': { username: 'Player p', playerId: 'p', password: 'test' },
+  'users/u': { username: 'Player p', playerId: 'p', password: 'test', role: 'participant' },
   ...Object.fromEntries(modes.map(mode => [`events/${mode}`, { ...event(mode), tournaments: [] }])),
 });
 
@@ -185,8 +229,162 @@ test('player/account/event creation is one atomic operation, including multiple 
       const users = [...db.store.entries()].filter(([key]) => key.startsWith('users/'));
       assert.equal(users.length, 1);
       assert.equal(users[0][1].playerId, result.id);
+      assert.equal(users[0][1].password, '1234');
+      assert.equal(users[0][1].username, result.name);
+      assert.equal(users[0][1].role, 'participant');
     }
   }
+});
+
+test('event player creation provides a global account usable in every future event, without enrolling everyone', async () => {
+  const db = database({
+    'events/winter': { ...event(), players: [], tournaments: [] },
+    'events/future': { ...event(), players: [], tournaments: [] },
+  });
+  const created = await createPlayerWithAccount('Mario Rossi', '', undefined, ['winter']);
+  const account = { ...db.store.get(`users/player_${created.id}`), id: `player_${created.id}` };
+  assert.equal(findLoginUser([account], [created], '  MARIO   ROSSI ', '1234'), account);
+  assert.equal(findLoginUser([account], [created], 'Mario Rossi', '123'), null);
+  assert.equal(db.store.get('events/future').players.length, 0);
+  await associatePlayerWithEvent('future', created.id);
+  assert.equal(db.store.get('events/future').players[0].id, created.id);
+  const source = readFileSync('components/EventPlayersView.tsx', 'utf8');
+  assert.match(source, /await createPlayerWithAccount\(name, phone, undefined, \[event.id\]\)/);
+});
+
+test('recovering an existing event player creates only its missing account and preserves points, rosters and results', async () => {
+  const original = fixture();
+  delete original['users/u'];
+  original['players/p'].summerRankingStartPoints = 215;
+  original['events/tournament_singolare'].tournaments = [tournament()];
+  const db = database(original);
+  const result = await synchronizePlayerAccounts();
+  assert.deepEqual(result, { created: 2, issues: [] });
+  const users = [...db.store].filter(([key]) => key.startsWith('users/')).map(([id, data]) => ({ id, ...data }));
+  assert.equal(findLoginUser(users, [original['players/p']], 'Player p', '1234').playerId, 'p');
+  for (const [key, value] of Object.entries(original)) assert.deepEqual(db.store.get(key), value);
+  assert.deepEqual(await synchronizePlayerAccounts(), { created: 0, issues: [] });
+  const reused = await createPlayerWithAccount(' PLAYER   P ', '', undefined, ['tournament_padel']);
+  assert.equal(reused.id, 'p');
+  assert.equal(reused.summerRankingStartPoints, 215);
+  assert.equal([...db.store.keys()].filter(key => key.startsWith('users/')).length, 2);
+});
+
+test('account recovery never overwrites personal passwords or usernames, including legacy short passwords', async () => {
+  for (const password of ['personal-password', '123', '1234']) {
+    const original = fixture();
+    original['users/u'].username = 'custom-login';
+    original['users/u'].password = password;
+    const db = database(original);
+    assert.deepEqual(await synchronizePlayerAccounts(), { created: 1, issues: [] });
+    assert.deepEqual(db.store.get('users/u'), original['users/u']);
+    const user = { ...db.store.get('users/u'), id: 'u' };
+    assert.equal(findLoginUser([user], [player('p')], 'Player p', password), user);
+    if (password !== '1234') assert.equal(findLoginUser([user], [player('p')], 'Player p', '1234'), null);
+  }
+});
+
+test('account recovery converges with a concurrent repair and preserves a password changed while checking', async () => {
+  const db = database({ 'players/p': player('p') }, { beforeTransaction: store => {
+    store.set('users/player_p', { username: 'custom', password: 'new-personal-password', role: 'participant', playerId: 'p' });
+  } });
+  assert.deepEqual(await synchronizePlayerAccounts(), { created: 0, issues: [] });
+  assert.equal(db.store.get('users/player_p').password, 'new-personal-password');
+  assert.equal(db.writes.length, 0);
+});
+
+test('account recovery reports name collisions and missing passwords without rebinding or resetting accounts', async () => {
+  const documents = {
+    'players/p': { ...player('p'), name: 'Mario Rossi' },
+    'players/q': { ...player('q'), name: 'Luca Bianchi' },
+    'users/organizer': { username: ' MARIO   ROSSI ', role: 'organizer', password: 'organizer-password' },
+    'users/q': { username: 'Luca Bianchi', role: 'participant', playerId: 'q' },
+  };
+  const db = database(documents);
+  const result = await synchronizePlayerAccounts();
+  assert.equal(result.created, 0);
+  assert.equal(result.issues.length, 2);
+  assert.match(result.issues[0], /altro giocatore/);
+  assert.match(result.issues[1], /password mancante/);
+  assert.deepEqual(Object.fromEntries(db.store), documents);
+  const duplicateDb = database({
+    'players/p': { ...player('p'), name: 'Mario Rossi' },
+    'players/q': { ...player('q'), name: ' mario  rossi ' },
+  });
+  assert.equal((await synchronizePlayerAccounts()).issues.length, 2);
+  assert.equal(duplicateDb.writes.length, 0);
+});
+
+test('account repair failures propagate and never report or persist a successful account creation', async () => {
+  const documents = { 'players/p': player('p') };
+  const db = database(documents, { fail: true });
+  await assert.rejects(synchronizePlayerAccounts(), /Commit/);
+  assert.deepEqual(Object.fromEntries(db.store), documents);
+});
+
+test('full-name login preserves custom usernames, rejects ambiguous identities and never applies a default fallback', () => {
+  const mario = { ...player('p'), name: 'Mario Rossi' };
+  const user = { id: 'u', username: 'custom-login', role: 'participant', playerId: 'p', password: 'changed-password' };
+  assert.equal(findLoginUser([user], [mario], ' Mario   Rossi ', 'changed-password'), user);
+  assert.equal(findLoginUser([user], [mario], 'CUSTOM-LOGIN', 'changed-password'), user);
+  assert.equal(findLoginUser([user], [mario], 'Mario Rossi', '1234'), null);
+  const organizer = { id: 'admin', username: 'Mario Rossi', role: 'organizer', password: 'admin-password' };
+  assert.equal(findLoginUser([user, organizer], [mario], 'Mario Rossi', 'changed-password'), null);
+  assert.equal(findLoginUser([user, organizer], [mario], 'Mario Rossi', 'admin-password'), organizer);
+  assert.equal(findLoginUser([user, { ...user, id: 'duplicate' }], [mario], 'custom-login', 'changed-password'), null);
+  assert.equal(findLoginUser([user], [mario, { ...mario, id: 'q' }], 'Mario Rossi', 'changed-password'), null);
+});
+
+test('player creation rejects normalized account and player-name collisions without partial writes', async () => {
+  for (const documents of [
+    { 'users/other': { username: ' MARIO   ROSSI ', role: 'organizer', password: 'admin-password' } },
+    { 'players/other': { ...player('other'), name: 'Mario Rossi', phone: '333' } },
+  ]) {
+    const db = database(documents);
+    await assert.rejects(createPlayerWithAccount('Mario Rossi', '', undefined), /giocatore/);
+    assert.equal(db.writes.length, 0);
+    assert.deepEqual(Object.fromEntries(db.store), documents);
+  }
+});
+
+test('Lista giocatori form persists an account and the Login form authenticates the same full name', async () => {
+  const winter = { ...event(), id: 'winter', players: [], tournaments: [] };
+  const db = database({ 'events/winter': winter });
+  const ui = uiHarness({ 1: 'Mario Rossi', 2: '' });
+  const props = { event: winter, players: [], isOrganizer: true, setEvents() { assert.fail('no optimistic roster writes'); } };
+  const form = elements(ui.render(EventPlayersView, props)).find(element => element.type === 'form');
+  await form.props.onSubmit({ preventDefault() {} });
+  const savedPlayer = db.store.get('events/winter').players[0];
+  const savedUsers = [...db.store].filter(([key]) => key.startsWith('users/')).map(([id, user]) => ({ id, ...user }));
+  assert.equal(savedUsers.length, 1);
+  assert.equal(savedUsers[0].password, '1234');
+  assert.equal(db.store.get(`players/${savedPlayer.id}`).name, 'Mario Rossi');
+  const feedback = elements(ui.render(EventPlayersView, props)).find(element => element.props?.role === 'status');
+  assert.match(feedback.props.children, /account di accesso/);
+
+  const loginUi = uiHarness({ 0: ' MARIO   ROSSI ', 1: '1234' });
+  let authenticated;
+  const loginTree = loginUi.render(Login, {
+    users: savedUsers, players: [savedPlayer], onLoginSuccess(user) { authenticated = user; },
+  });
+  elements(loginTree).find(element => element.type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(authenticated, savedUsers[0]);
+});
+
+test('opening Controllo Utenti repairs missing accounts and displays them after the Firestore update', async () => {
+  const db = database({ 'players/p': player('p') });
+  const ui = uiHarness();
+  const props = { users: [], players: [player('p')], onClose() {} };
+  ui.render(AdminUsersModal, props);
+  ui.effects.splice(0).forEach(effect => effect());
+  await new Promise(resolve => setImmediate(resolve));
+  const account = db.store.get('users/player_p');
+  assert.equal(account.password, '1234');
+  const tree = ui.render(AdminUsersModal, { ...props, users: [{ ...account, id: 'player_p' }] });
+  ui.effects.splice(0).forEach(effect => effect());
+  const updated = elements(ui.render(AdminUsersModal, { ...props, users: [{ ...account, id: 'player_p' }] }));
+  assert.ok(updated.some(element => element.type === 'span' && element.props.children === 'Player p'));
+  assert.match(elements(tree).find(element => element.props?.role === 'status').props.children, /1 account mancanti creati/);
 });
 
 test('reusing a player preserves the existing login, synchronizes points and avoids duplicate accounts', async () => {

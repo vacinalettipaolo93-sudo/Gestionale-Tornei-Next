@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { type User } from '../types';
+import { type Player, type User } from '../types';
+import { findLoginUser } from '../utils/playerLogin';
 
 interface LoginProps {
   users: User[];
+  players: Player[];
   onLoginSuccess: (user: User) => void;
 }
 
@@ -19,16 +21,14 @@ const NextTsLogo: React.FC<{ className?: string }> = ({ className = '' }) => (
   </svg>
 );
 
-const Login: React.FC<LoginProps> = ({ users, onLoginSuccess }) => {
+const Login: React.FC<LoginProps> = ({ users, players, onLoginSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const user = users.find(
-      u => u.username.trim().toLowerCase() === username.trim().toLowerCase() && u.password === password
-    );
+    const user = findLoginUser(users, players, username, password);
     if (user) {
       onLoginSuccess(user);
     } else {
@@ -94,6 +94,7 @@ const Login: React.FC<LoginProps> = ({ users, onLoginSuccess }) => {
         <div className="text-center mt-4 text-xs text-text-secondary/50">
           <p>
             Partecipante: <strong>Nome Cognome</strong> / <strong>1234</strong>
+            {' '}(oppure la password personale, se modificata)
           </p>
         </div>
       </div>
