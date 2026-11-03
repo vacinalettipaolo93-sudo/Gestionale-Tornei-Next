@@ -35,8 +35,9 @@ function getInitialDate(weekends: ReturnType<typeof getTournamentWeekends>): str
 }
 
 export default function AvailabilityTab({ event, tournament, selectedGroup, loggedInPlayerId }: Props) {
-  const participantIds = selectedGroup.playerIds ?? [];
-  const participants = participantIds.map(id => event.players.find(player => player.id === id)).filter(Boolean) as Player[];
+  const visibleParticipantIds = [...new Set(selectedGroup.playerIds ?? [])];
+  const participantIds = [...new Set([...visibleParticipantIds, ...(loggedInPlayerId ? [loggedInPlayerId] : [])])];
+  const participants = visibleParticipantIds.map(id => event.players.find(player => player.id === id)).filter(Boolean) as Player[];
   const now = useSlotClock(event);
   const scope: TournamentAvailabilityScope = { eventId: event.id, tournamentId: tournament.id };
   const availability = useTournamentAvailability(participantIds, scope);
@@ -223,7 +224,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
       </section>
 
       <section className="space-y-3">
-        <h4 className="font-bold">Disponibilità dichiarate dai partecipanti · <span className="capitalize">{formattedDate}</span></h4>
+        <h4 className="font-bold">Disponibilità dichiarate · {selectedGroup.name} · <span className="capitalize">{formattedDate}</span></h4>
         <div className="overflow-x-auto rounded-lg border border-tertiary">
           <table className="min-w-full text-sm bg-primary">
             <thead>
@@ -269,7 +270,9 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                 );
               })}
               {participants.length === 0 && (
-                <tr><td className="p-3 text-text-secondary" colSpan={TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).length + 2}>Nessun partecipante nel girone.</td></tr>
+                <tr><td className="p-3 text-text-secondary" colSpan={TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).length + 2}>
+                  {selectedGroup.name === 'Nessun girone assegnato' ? 'Non sei assegnato a un girone.' : 'Nessun partecipante assegnato.'}
+                </td></tr>
               )}
             </tbody>
           </table>
