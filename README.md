@@ -69,6 +69,8 @@ Gli slot già presenti in `tournament.timeSlots` e `event.globalTimeSlots` e le 
 
 ## Smartphone, navigazione e gestione risultati
 
+Quando un partecipante apre un evento, l'elenco scorre automaticamente fino alla scheda **Il mio torneo**, senza aprire il torneo o nascondere gli altri. Il riconoscimento usa l'assegnazione ai gironi, inclusa la coppia del giocatore nel Padel. Se il partecipante è in più tornei, viene raggiunto il primo nell'ordine dell'elenco; senza assegnazione e per gli organizzatori non viene effettuato lo scorrimento personale. Il posizionamento avviene una sola volta per ingresso nell'evento, anche se l'assegnazione arriva dopo il caricamento, senza ripetersi agli aggiornamenti Firebase.
+
 Aprire una pagina, cambiare scheda o girone porta all'inizio della sezione selezionata, senza riportare in alto durante aggiornamenti Firebase o compilazione dei moduli. Nel ranking Tennis resta disponibile il posizionamento automatico sulla propria riga. Le tabelle ampie scorrono orizzontalmente nel proprio riquadro; nomi lunghi e azioni delle partite vanno a capo sugli schermi piccoli.
 
 **Prenota**, **Modifica prenotazione**, **Inserisci risultato** e **Modifica risultato** delle partite aprono finestre centrate nello schermo, non ancorate al pulsante. Le finestre hanno scorrimento interno, tengono conto dell'altezza disponibile anche in orizzontale, bloccano lo scorrimento della pagina e mantengono il focus al loro interno. Escape chiude senza salvare, salvo durante un salvataggio; alla chiusura il focus ritorna al controllo precedente senza spostare la pagina.
