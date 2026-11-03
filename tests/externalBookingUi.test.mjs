@@ -74,20 +74,35 @@ function elements(tree) {
   return [tree, ...elements(tree.props?.children)];
 }
 
-test('choosing each centre opens the supplied external link in a new tab, without an app write', () => {
+test('choosing a centre reveals only its call, WhatsApp and online options without opening a site or writing', () => {
   const ui = harness();
-  for (const [venueId, url] of [
-    ['canottieri-salo', 'https://playtomic.com/it/clubs/tennis-salo-canottieri'],
-    ['paitone-arena', 'https://paitonearena.wansport.com/'],
+  assert.equal(elements(ui.render()).filter(element => element.type === 'a').length, 0);
+  for (const [venueId, name, phone, url] of [
+    ['canottieri-salo', 'Canottieri Salò', '+393397957909', 'https://playtomic.com/it/clubs/tennis-salo-canottieri'],
+    ['paitone-arena', 'Paitone Arena', '+393896556476', 'https://paitonearena.wansport.com/'],
   ]) {
+    const button = ui.find(element => element.type === 'button' && element.props['aria-label'] === `Scegli ${name}`);
+    assert.equal(button.props.type, 'button');
+    assert.equal(button.props.href, undefined);
+    button.props.onClick();
+    assert.equal(ui.find(element => element.props?.id === 'booking-venue').props.value, venueId);
+    const links = elements(ui.render()).filter(element => element.type === 'a');
+    assert.equal(links.length, 3);
+    const call = links.find(element => element.props.href === `tel:${phone}`);
+    assert.ok(call);
+    assert.equal(call.props.target, undefined);
+    const whatsapp = links.find(element => element.props.href === `https://wa.me/${phone.slice(1)}`);
+    assert.ok(whatsapp);
+    assert.equal(whatsapp.props.target, '_blank');
+    assert.equal(whatsapp.props.rel, 'noopener noreferrer');
     const link = ui.find(element => element.type === 'a' && element.props.href === url);
     assert.ok(link);
     assert.equal(link.props.target, '_blank');
     assert.equal(link.props.rel, 'noopener noreferrer');
-    link.props.onClick();
-    assert.equal(ui.find(element => element.props?.id === 'booking-venue').props.value, venueId);
+    for (const option of links) option.props.onClick({ preventDefault() { assert.fail('Contact option unexpectedly blocked'); } });
     assert.equal(ui.actions.length, 0);
     assert.equal(ui.closed, false);
+    assert.equal(ui.find(element => element.type === 'input' && element.props.type === 'checkbox').props.checked, false);
   }
 });
 
