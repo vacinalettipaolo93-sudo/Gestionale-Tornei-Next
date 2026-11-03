@@ -148,13 +148,6 @@ const AdminUsersModal: React.FC<AdminUsersModalProps> = ({ users, players, onClo
         await updateDoc(doc(db, 'users', actionState.userId), {
           username: actionState.newUsername.trim(),
         });
-        setLocalUsers(prev =>
-          prev.map(u =>
-            u.id === actionState.userId
-              ? { ...u, username: actionState.newUsername.trim() }
-              : u
-          )
-        );
       } else {
         await updateDoc(doc(db, 'users', actionState.userId), {
           password: actionState.newPassword,

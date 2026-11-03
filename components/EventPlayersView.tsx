@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
 import { collection, doc, getDocs, query, runTransaction, where } from 'firebase/firestore';
+import React, { useMemo, useState } from 'react';
 import { db } from '../firebase';
 import { type Event, type Player } from '../types';
 import { createInitialsAvatar } from '../utils/avatar';
@@ -38,12 +38,6 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
     [event.players],
   );
 
-  const persistEventPlayers = (nextPlayers: Player[]) => {
-    setEvents(previousEvents => previousEvents.map(item =>
-      item.id === event.id ? { ...item, players: nextPlayers } : item,
-    ));
-  };
-
   const associatePlayer = async (player: Player) => {
     if (!isOrganizer || loadingPlayerId || isCreating) return;
     setLoadingPlayerId(player.id);
@@ -78,10 +72,8 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
       });
 
       if (updatedPlayers.added) {
-        persistEventPlayers(updatedPlayers.players);
         setFeedback({ type: 'success', message: `${player.name} aggiunto alla lista dell’evento.` });
       } else {
-        persistEventPlayers(updatedPlayers.players);
         setFeedback({ type: 'success', message: `${player.name} è già presente nell’evento.` });
       }
     } catch (error) {
@@ -146,7 +138,6 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
         return { ...association, player: eventPlayer };
       });
 
-      persistEventPlayers(result.players);
       setNewPlayerName('');
       setNewPlayerPhone('');
       setFeedback({
@@ -188,7 +179,6 @@ const EventPlayersView: React.FC<EventPlayersViewProps> = ({ event, players, set
         return nextPlayers;
       });
 
-      persistEventPlayers(updatedPlayers);
       setFeedback({ type: 'success', message: `${player.name} rimosso dall’evento; l’archivio globale non è stato modificato.` });
     } catch (error) {
       console.error('Errore rimozione giocatore dall’evento', error);

@@ -9,12 +9,13 @@ interface AvailabilityState extends TournamentAvailability {
   key: string;
   loading: boolean;
   error: string | null;
+  pendingWrites: boolean;
 }
 
 export function useTournamentAvailability(playerIds: string[], scope: TournamentAvailabilityScope) {
   const key = JSON.stringify({ ids: [...new Set(playerIds)].sort(), eventId: scope.eventId, tournamentId: scope.tournamentId });
   const [state, setState] = useState<AvailabilityState>({
-    key: '', slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, loading: true, error: null,
+    key: '', slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, loading: true, error: null, pendingWrites: false,
   });
 
   useEffect(() => {
@@ -23,6 +24,7 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
     const dateUnavailMap: TournamentAvailability['dateUnavailMap'] = {};
     const venueMap: NonNullable<TournamentAvailability['venueMap']> = {};
     const pending = new Set<string>();
+    const pendingWrites = new Set<string>();
     let active = true;
     let error: string | null = null;
     const subscriptions: Array<() => void> = [];
@@ -34,7 +36,7 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
     const publish = () => {
       if (active) setState({
         key, slotPrefMap: { ...slotPrefMap }, dateUnavailMap: { ...dateUnavailMap }, venueMap: { ...venueMap },
-        loading: pending.size > 0 && !error, error,
+        loading: pending.size > 0 && !error, error, pendingWrites: pendingWrites.size > 0,
       });
     };
     publish();
@@ -44,7 +46,14 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
         const subscriptionKey = `${collectionName}:${index}`;
         subscriptions.push(onSnapshot(
           query(collection(db, collectionName), where('playerId', 'in', chunk)),
+          { includeMetadataChanges: true },
           snapshot => {
+            if (snapshot.metadata.hasPendingWrites) {
+              pendingWrites.add(subscriptionKey);
+              publish();
+              return;
+            }
+            pendingWrites.delete(subscriptionKey);
             if (collectionName === 'availability_settings') {
               chunk.forEach(id => { delete venueMap[id]; });
               snapshot.docs.forEach(document => {
@@ -76,6 +85,7 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
             console.error('Errore lettura disponibilità torneo', cause);
             error = 'Impossibile caricare le disponibilità. Riapri la scheda per riprovare.';
             pending.delete(subscriptionKey);
+            pendingWrites.delete(subscriptionKey);
             publish();
           },
         ));
@@ -88,6 +98,6 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
   }, [key]);
 
   return state.key === key ? state : {
-    slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, loading: true, error: null,
+    slotPrefMap: {}, dateUnavailMap: {}, venueMap: {}, loading: true, error: null, pendingWrites: false,
   };
 }

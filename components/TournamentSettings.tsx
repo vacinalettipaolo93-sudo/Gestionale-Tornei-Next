@@ -1,11 +1,11 @@
+import { saveEventChanges } from '../services/eventDataService';
+import { PersistenceFeedback, usePersistenceAction, useSyncedDraft } from './usePersistenceAction';
 /* TournamentSettings.tsx - versione aggiornata: merge settings con default per garantire tieBreakers disponibili
    + aggiunta opzione "Andata e Ritorno" (groupRoundRobin) per ogni girone. Ho mantenuto TUTTO il file originale
    e aggiunto solo le parti necessarie per il nuovo flag. */
-import React, { useState, useEffect } from 'react';
-import { type Event, type Tournament, type TournamentSettings, type PointRule, type TieBreaker, PlayoffSetting, ConsolationSetting } from '../types';
-import { TrashIcon, PlusIcon, ArrowUpIcon, ArrowDownIcon } from './Icons';
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
+import React, { useMemo, useState } from 'react';
+import { type Event, type PointRule, type TieBreaker, type Tournament, type TournamentSettings, ConsolationSetting, PlayoffSetting } from '../types';
+import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from './Icons';
 
 interface TournamentSettingsProps {
     event: Event;
@@ -31,22 +31,14 @@ const DEFAULT_SETTINGS: TournamentSettings = {
 } as any;
 
 const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tournament, setEvents }) => {
+    const persistence = usePersistenceAction();
     // merge incoming tournament.settings with defaults to ensure all fields exist
-    const [settings, setSettings] = useState<TournamentSettings>({
+    const remoteSettings = useMemo<TournamentSettings>(() => ({
         ...DEFAULT_SETTINGS,
         ...(tournament.settings || {}),
-        // ensure groupRoundRobin exists (map groupId -> boolean)
-        groupRoundRobin: (tournament.settings && (tournament.settings as any).groupRoundRobin) ? (tournament.settings as any).groupRoundRobin : {}
-    } as any);
+    }), [tournament.settings]);
+    const [settings, setSettings, baselineSettings] = useSyncedDraft(remoteSettings, tournament.id);
     const [saved, setSaved] = useState(false);
-
-    useEffect(() => {
-        setSettings({
-            ...DEFAULT_SETTINGS,
-            ...(tournament.settings || {}),
-            groupRoundRobin: (tournament.settings && (tournament.settings as any).groupRoundRobin) ? (tournament.settings as any).groupRoundRobin : {}
-        } as any);
-    }, [tournament]);
 
     const handleRuleChange = (ruleId: string, field: keyof PointRule, value: string) => {
         const numericValue = parseInt(value, 10) || 0;
@@ -78,12 +70,12 @@ const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tourname
             pointRules: prev.pointRules.filter(rule => rule.id !== ruleId)
         }));
     };
-    
+
     const handleMoveTieBreaker = (index: number, direction: 'up' | 'down') => {
         const newTieBreakers = [...settings.tieBreakers];
         const item = newTieBreakers[index];
         const swapIndex = direction === 'up' ? index - 1 : index + 1;
-        
+
         if (swapIndex < 0 || swapIndex >= newTieBreakers.length) return;
 
         newTieBreakers[index] = newTieBreakers[swapIndex];
@@ -113,7 +105,7 @@ const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tourname
 
     const handleConsolationSettingChange = (groupId: string, field: 'startRank' | 'endRank', value: string) => {
         const num = parseInt(value, 10) || 0;
-        
+
         setSettings(prev => {
             const existing = prev.consolationSettings.find(s => s.groupId === groupId);
             let newConsolationSettings: ConsolationSetting[];
@@ -141,27 +133,24 @@ const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tourname
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        // persist settings into tournament.settings and save in Firestore
-        setEvents(prevEvents => prevEvents.map(ev => 
-            ev.id === event.id ? {
-                ...ev,
-                tournaments: ev.tournaments.map(t => 
+        await persistence.run(async () => {
+            // persist settings into tournament.settings and save in Firestore
+
+            await saveEventChanges({
+                ...event, tournaments: event.tournaments.map(t => t.id === tournament.id ? { ...t, settings: baselineSettings } : t),
+            }, {
+                tournaments: event.tournaments.map(t =>
                     t.id === tournament.id ? { ...t, settings } : t
                 )
-            } : ev
-        ));
-        await updateDoc(doc(db, "events", event.id), {
-            tournaments: event.tournaments.map(t =>
-                t.id === tournament.id ? { ...t, settings } : t
-            )
+            });
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
         });
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
     };
 
     const inputClasses = "w-16 text-center bg-primary p-2 rounded-lg border border-tertiary focus:ring-2 focus:ring-accent";
 
-    return (
+    return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
         <div className="bg-secondary p-6 rounded-xl shadow-lg max-w-3xl mx-auto">
             <h3 className="text-xl font-bold mb-6 text-accent">Impostazioni Torneo</h3>
             <form onSubmit={handleSubmit} className="space-y-8">
@@ -330,7 +319,7 @@ const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tourname
                 </div>
             </form>
         </div>
-    );
+    )}</React.Fragment>;
 };
 
 export default TournamentSettings;

@@ -1,74 +1,15 @@
 import React, { useState } from 'react';
+import { saveEventChanges } from '../services/eventDataService';
+import { createPlayerWithAccount, deletePlayerEverywhere } from '../services/playerDataService';
 import { type Event, type Player } from '../types';
-import { db } from "../firebase";
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, deleteDoc } from "firebase/firestore";
-import { createInitialsAvatar } from '../utils/avatar';
+import { updatePlayerEverywhere } from '../utils/updatePlayerProfile';
+import { usePersistenceAction } from './usePersistenceAction';
 
 interface PlayerManagementProps {
   event: Event;
   setEvents: React.Dispatch<React.SetStateAction<Event[]>>;
   isOrganizer: boolean;
   onPlayerContact: (player: Player) => void;
-}
-
-// Funzione anti-doppioni per aggiungere giocatore e utente
-async function addPlayerAndUserNoDuplicates(event: Event, playerData: { name: string; phone: string; avatar: string; summerRankingStartPoints: number; }) {
-  const playersRef = collection(db, "players");
-  const q = query(playersRef, where("name", "==", playerData.name), where("phone", "==", playerData.phone));
-  const existingPlayersSnap = await getDocs(q);
-  let playerId;
-  if (!existingPlayersSnap.empty) {
-    const playerDoc = existingPlayersSnap.docs[0];
-    playerId = playerDoc.id;
-    await updateDoc(playerDoc.ref, {
-      summerRankingStartPoints: playerDoc.data().summerRankingStartPoints ?? playerData.summerRankingStartPoints,
-      summerRankingJoinedAt: playerDoc.data().summerRankingJoinedAt ?? new Date().toISOString(),
-    });
-  } else {
-    const playerDocRef = await addDoc(playersRef, {
-      name: playerData.name,
-      phone: playerData.phone,
-      avatar: playerData.avatar,
-      status: "confirmed",
-      summerRankingStartPoints: playerData.summerRankingStartPoints,
-      summerRankingJoinedAt: new Date().toISOString(),
-    });
-    playerId = playerDocRef.id;
-  }
-  const usersRef = collection(db, "users");
-  const userQ = query(usersRef, where("username", "==", playerData.name));
-  const userSnap = await getDocs(userQ);
-  if (userSnap.empty) {
-    await addDoc(usersRef, {
-      username: playerData.name,
-      password: "1234",
-      role: "participant",
-      playerId
-    });
-  }
-  const alreadyInEvent = event.players.some(p => p.id === playerId);
-  if (!alreadyInEvent) {
-    const newPlayer = {
-      id: playerId,
-      name: playerData.name,
-      phone: playerData.phone,
-      avatar: playerData.avatar,
-      status: "confirmed"
-    };
-    const updatedPlayers = [...event.players, newPlayer];
-    await updateDoc(doc(db, "events", event.id), { players: updatedPlayers });
-  }
-}
-
-// Funzione per cancellare giocatore da evento e da Firestore
-async function removePlayerCompletely(event: Event, playerId: string) {
-  const updatedPlayers = event.players.filter(p => p.id !== playerId);
-  await updateDoc(doc(db, "events", event.id), { players: updatedPlayers });
-  await deleteDoc(doc(db, "players", playerId));
-  const usersRef = collection(db, "users");
-  const userQ = query(usersRef, where("playerId", "==", playerId));
-  const userSnap = await getDocs(userQ);
-  userSnap.forEach(u => deleteDoc(u.ref));
 }
 
 // Funzione che determina se il giocatore è assegnato ad almeno un girone
@@ -79,6 +20,7 @@ const isPlayerAssignedToGroup = (event: Event, playerId: string): boolean => {
 };
 
 const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, isOrganizer, onPlayerContact }) => {
+    const persistence = usePersistenceAction();
     const [replacingPlayer, setReplacingPlayer] = useState<Player | null>(null);
     const [replacementTarget, setReplacementTarget] = useState<string>('');
     const [newPlayerName, setNewPlayerName] = useState('');
@@ -105,24 +47,7 @@ const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, i
         if(!newPlayerName.trim() || !newPlayerPhone.trim()) return;
         setLoading(true);
         try {
-          await addPlayerAndUserNoDuplicates(event, {
-            name: newPlayerName.trim(),
-            phone: newPlayerPhone.trim(),
-            avatar: createInitialsAvatar(newPlayerName.trim()),
-            summerRankingStartPoints: Number(newPlayerSummerRankingPoints || 0),
-          });
-          setEvents(prevEvents => prevEvents.map(ev =>
-            ev.id === event.id
-              ? {
-                  ...ev,
-                  players: [
-                    ...ev.players.filter(
-                      (p, i, arr) => arr.findIndex(pp => pp.id === p.id) === i
-                    )
-                  ]
-                }
-              : ev
-          ));
+          await createPlayerWithAccount(newPlayerName, newPlayerPhone, Number(newPlayerSummerRankingPoints || 0), [event.id]);
           setNewPlayerName('');
           setNewPlayerPhone('');
           setNewPlayerSummerRankingPoints('0');
@@ -134,16 +59,10 @@ const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, i
 
     // CONFERMA GIOCATORE E AGGIORNA FIRESTORE
     const handleConfirmPlayer = async (playerId: string) => {
-        const updatedPlayers = event.players.map(p => p.id === playerId ? {...p, status: 'confirmed'} : p);
-        setEvents(prevEvents => prevEvents.map(e => {
-            if (e.id !== event.id) return e;
-            return {
-                ...e,
-                players: updatedPlayers
-            }
-        }));
-        await updateDoc(doc(db, "events", event.id), {
-            players: updatedPlayers
+        await persistence.run(async () => {
+            await saveEventChanges(event, {
+                players: event.players.map(p => p.id === playerId ? { ...p, status: 'confirmed' } : p),
+            });
         });
     };
 
@@ -151,15 +70,7 @@ const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, i
     const handleDeletePlayer = async (playerId: string) => {
       setLoading(true);
       try {
-        await removePlayerCompletely(event, playerId);
-        setEvents(prevEvents => prevEvents.map(ev =>
-          ev.id === event.id
-            ? {
-                ...ev,
-                players: ev.players.filter(p => p.id !== playerId)
-              }
-            : ev
-        ));
+        await deletePlayerEverywhere(playerId);
       } catch (err) {
         alert("Errore cancellazione: " + (err as Error).message);
       }
@@ -169,28 +80,25 @@ const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, i
     // SOSTITUISCI GIOCATORE E AGGIORNA FIRESTORE
     const handleReplacePlayer = async () => {
         if (!replacingPlayer || !replacementTarget) return;
-        const newTournaments = event.tournaments.map(tourn => ({
-            ...tourn,
-            groups: tourn.groups.map(group => {
-                if (!group.playerIds.includes(replacingPlayer.id)) return group;
-                return {
-                    ...group,
-                    playerIds: group.playerIds.map(id => id === replacingPlayer.id ? replacementTarget : id),
-                    matches: group.matches.map(match => {
-                        if(match.player1Id === replacingPlayer.id) return {...match, player1Id: replacementTarget};
-                        if(match.player2Id === replacingPlayer.id) return {...match, player2Id: replacementTarget};
-                        return match;
-                    })
-                };
-            })
-        }));
-        setEvents(prevEvents => prevEvents.map(e =>
-            e.id === event.id ? {...e, tournaments: newTournaments} : e
-        ));
-        await updateDoc(doc(db, "events", event.id), {
-            tournaments: newTournaments
+        await persistence.run(async () => {
+            const newTournaments = event.tournaments.map(tourn => ({
+                ...tourn,
+                groups: tourn.groups.map(group => {
+                    if (!group.playerIds.includes(replacingPlayer.id)) return group;
+                    return {
+                        ...group,
+                        playerIds: group.playerIds.map(id => id === replacingPlayer.id ? replacementTarget : id),
+                        matches: group.matches.map(match => {
+                            if (match.player1Id === replacingPlayer.id) return { ...match, player1Id: replacementTarget };
+                            if (match.player2Id === replacingPlayer.id) return { ...match, player2Id: replacementTarget };
+                            return match;
+                        })
+                    };
+                })
+            }));
+            await saveEventChanges(event, { tournaments: newTournaments });
+            setReplacingPlayer(null);
         });
-        setReplacingPlayer(null);
     };
 
     const potentialReplacements = confirmedPlayers.filter(p => p.id !== replacingPlayer?.id);
@@ -212,9 +120,7 @@ const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, i
       if (!editingPlayer) return;
       setEditLoading(true);
       try {
-        const updatedPlayers = event.players.map(p => p.id === editingPlayer.id ? { ...p, name: editName.trim(), phone: editPhone.trim() || undefined } : p);
-        setEvents(prevEvents => prevEvents.map(ev => ev.id === event.id ? { ...ev, players: updatedPlayers } : ev));
-        await updateDoc(doc(db, "events", event.id), { players: updatedPlayers });
+        await updatePlayerEverywhere(editingPlayer.id, { name: editName.trim(), phone: editPhone.trim() });
         closeEditModal();
       } catch (err) {
         alert("Errore durante il salvataggio: " + (err as Error).message);
@@ -236,8 +142,9 @@ const PlayerManagement: React.FC<PlayerManagementProps> = ({ event, setEvents, i
 
     return (
         <div className="bg-secondary p-6 rounded-xl shadow-lg">
+            {persistence.error && <p role="alert" className="text-red-400 mb-3">{persistence.error}</p>}
             <h3 className="text-xl font-bold mb-6 text-accent">Partecipanti ({confirmedPlayers.length})</h3>
-            
+
              {isOrganizer && (
                 <>
                 <div className="mb-8 bg-primary/50 p-4 rounded-lg">

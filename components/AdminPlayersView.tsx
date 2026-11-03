@@ -1,12 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { collection, addDoc, deleteDoc, doc, getDocs, query, updateDoc, where, writeBatch } from 'firebase/firestore';
-import { db } from '../firebase';
+import React, { useMemo, useState } from 'react';
+import { associatePlayerWithEvent, createPlayerWithAccount, deletePlayerEverywhere, removePlayerFromRanking } from '../services/playerDataService';
 import { type Event, type Player, type SummerRankingData } from '../types';
-import { removePlayerFromPadelIndividualMaster } from '../utils/padelIndividualRanking';
-import { removePlayerFromSummerRankingMaster } from '../utils/summerRanking';
-import { matchIncludesPlayer, normalizeRankingData, sanitizeRankingDataForFirestore } from '../utils/rankingEvent';
-import { removePlayerFromRankingEvent } from '../utils/eventPlayers.js';
-import { createInitialsAvatar } from '../utils/avatar';
+import { normalizeRankingData } from '../utils/rankingEvent';
+import { updatePlayerEverywhere } from '../utils/updatePlayerProfile';
 
 interface AdminPlayersViewProps {
   players: Player[];
@@ -20,7 +16,6 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
   players,
   events,
   rankingEvent,
-  setEvents,
   isOrganizer = false,
 }) => {
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -71,53 +66,8 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
     [currentRankingEvent.players],
   );
   const addPlayerToRankingEvent = async (player: Player, startPoints: number) => {
-    const event = events.find(item => item.id === rankingEvent.id) ?? rankingEvent;
-    const currentRankingData = normalizeRankingData(event.rankingData ?? rankingData, event.eventType);
-    const participantIds = Array.from(new Set([...(currentRankingData.participantIds ?? []), player.id]));
-    const existingEventPlayer = event.players.find(existing => existing.id === player.id);
-    const alreadyInEventPlayers = Boolean(existingEventPlayer);
-    const joinedAt = player.summerRankingJoinedAt ?? existingEventPlayer?.summerRankingJoinedAt ?? new Date().toISOString();
-    const eventPlayer: Player = {
-      id: player.id,
-      name: player.name,
-      phone: player.phone ?? existingEventPlayer?.phone ?? '',
-      avatar: player.avatar ?? existingEventPlayer?.avatar ?? createInitialsAvatar(player.name),
-      status: 'confirmed',
-      summerRankingStartPoints: startPoints,
-      summerRankingJoinedAt: joinedAt,
-    };
-    const nextPlayers = alreadyInEventPlayers
-      ? event.players.map(existing => existing.id === player.id ? eventPlayer : existing)
-      : [...event.players, eventPlayer];
-    const nextRankingData: SummerRankingData = {
-      ...currentRankingData,
-      participantIds,
-    };
-    const eventPayload = {
-      eventType: rankingEvent.eventType,
-      players: nextPlayers,
-      rankingData: sanitizeRankingDataForFirestore(nextRankingData, rankingEvent.eventType),
-    };
-
-    const batch = writeBatch(db);
-    batch.update(doc(db, 'players', player.id), {
-      summerRankingStartPoints: startPoints,
-      summerRankingJoinedAt: joinedAt,
-    });
-    batch.update(doc(db, 'events', rankingEvent.id), eventPayload);
-    await batch.commit();
-
-    setEvents(prev =>
-      prev.map(item => item.id === rankingEvent.id ? {
-        ...item,
-        ...eventPayload,
-      } : item),
-    );
-
-    return {
-      wasAlreadyParticipant: participantIdSet.has(player.id),
-      wasAlreadyInEventPlayers: alreadyInEventPlayers,
-    };
+    await associatePlayerWithEvent(rankingEvent.id, player.id, startPoints);
+    return { wasAlreadyParticipant: participantIdSet.has(player.id), wasAlreadyInEventPlayers: eventPlayerIdSet.has(player.id) };
   };
 
   const addPlayerToRanking = async (player: Player, startPoints: number) => {
@@ -141,169 +91,43 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
     setFeedback({ type: 'success', message: `${player.name} associato correttamente al ranking.` });
   };
 
-  const addPlayerToEvent = async (eventId: string, player: Player, startPoints: number) => {
-    if (!eventId) return;
-    const event = events.find(item => item.id === eventId);
-    if (!event || event.players.some(existing => existing.id === player.id)) return;
-
-    if ((player.summerRankingStartPoints ?? 0) !== startPoints) {
-      await updateDoc(doc(db, 'players', player.id), {
-        summerRankingStartPoints: startPoints,
-        summerRankingJoinedAt: player.summerRankingJoinedAt ?? new Date().toISOString(),
-      });
-    }
-
-    const eventPlayer: Player = {
-      id: player.id,
-      name: player.name,
-      phone: player.phone ?? '',
-      avatar: player.avatar,
-      status: 'confirmed',
-      summerRankingStartPoints: startPoints,
-      summerRankingJoinedAt: player.summerRankingJoinedAt ?? new Date().toISOString(),
-    };
-    const updatedPlayers = [...event.players, eventPlayer];
-    setEvents(prev =>
-      prev.map(item => item.id === event.id ? { ...item, players: updatedPlayers } : item),
-    );
-    await updateDoc(doc(db, 'events', event.id), { players: updatedPlayers });
-  };
-
   const handleSaveLevelPoints = async (player: Player) => {
-    const rawValue = eventPlayerPointsById[player.id] ?? String(player.summerRankingStartPoints ?? 0);
-    if (rawValue.trim() === '') {
-      setFeedback({ type: 'error', message: `Punti livello non validi per ${player.name}.` });
+    const raw = eventPlayerPointsById[player.id] ?? String(player.summerRankingStartPoints ?? 0);
+    const points = Number(raw);
+    if (!raw.trim() || !Number.isFinite(points) || points < 0) {
+      setFeedback({ type: 'error', message: 'Inserisci punti validi maggiori o uguali a zero.' }); return;
+    }
+    if ((player.summerRankingStartPoints ?? 0) === points) {
+      setEventPlayerPointsById(previous => { const next = { ...previous }; delete next[player.id]; return next; });
       return;
     }
-    const startPoints = Number(rawValue);
-    if (!Number.isFinite(startPoints) || startPoints < 0) {
-      setFeedback({ type: 'error', message: `Punti livello non validi per ${player.name}.` });
-      return;
-    }
-    if ((player.summerRankingStartPoints ?? 0) === startPoints) {
-      setEventPlayerPointsById(prev => ({ ...prev, [player.id]: String(startPoints) }));
-      return;
-    }
-
-    const joinedAt = player.summerRankingJoinedAt ?? new Date().toISOString();
     try {
-      await updateDoc(doc(db, 'players', player.id), {
-        summerRankingStartPoints: startPoints,
-        summerRankingJoinedAt: joinedAt,
+      await updatePlayerEverywhere(player.id, {
+        summerRankingStartPoints: points,
+        summerRankingJoinedAt: player.summerRankingJoinedAt ?? new Date().toISOString()
       });
-
-      const eventsToPersist = events
-        .filter(event => event.players.some(eventPlayer => eventPlayer.id === player.id))
-        .map(event => ({
-          id: event.id,
-          players: event.players.map(eventPlayer =>
-            eventPlayer.id === player.id
-              ? {
-                ...eventPlayer,
-                summerRankingStartPoints: startPoints,
-                summerRankingJoinedAt: joinedAt,
-              }
-              : eventPlayer,
-          ),
-        }));
-
-      if (eventsToPersist.length > 0) {
-        setEvents(prev =>
-          prev.map(event => {
-            const update = eventsToPersist.find(item => item.id === event.id);
-            return update ? { ...event, players: update.players } : event;
-          }),
-        );
-        await Promise.all(eventsToPersist.map(event => updateDoc(doc(db, 'events', event.id), { players: event.players })));
-      }
+      setEventPlayerPointsById(previous => { const next = { ...previous }; delete next[player.id]; return next; });
+      setFeedback({ type: 'success', message: 'Punti livello aggiornati.' });
     } catch (error) {
       console.error('Errore salvataggio punti livello', error);
-      setFeedback({ type: 'error', message: `Errore salvataggio punti livello per ${player.name}.` });
-      return;
+      setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Punti non salvati. Riprova.' });
     }
-
-    setEventPlayerPointsById(prev => ({ ...prev, [player.id]: String(startPoints) }));
-    setFeedback({ type: 'success', message: `Punti livello aggiornati per ${player.name}.` });
-  };
-
-  useEffect(() => {
-    setEventPlayerPointsById(prev => {
-      const next: Record<string, string> = {};
-      for (const player of players) {
-        next[player.id] = prev[player.id] ?? String(player.summerRankingStartPoints ?? 0);
-      }
-      return next;
-    });
-  }, [players]);
-
-  const ensureUserForPlayer = async (playerId: string, username: string) => {
-    const usersRef = collection(db, 'users');
-    const userSnap = await getDocs(query(usersRef, where('username', '==', username)));
-    if (!userSnap.empty) return;
-
-    await addDoc(usersRef, {
-      username,
-      password: '1234',
-      role: 'participant',
-      playerId,
-    });
   };
 
   const handleCreatePlayer = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!newPlayerName.trim()) return;
+    if (loading) return;
     setLoading(true);
+    setFeedback(null);
     try {
-      const trimmedName = newPlayerName.trim();
-      const trimmedPhone = newPlayerPhone.trim();
-      const startPoints = Number(newPlayerStartPoints || 0);
-      const playersRef = collection(db, 'players');
-      const existingSnap = await getDocs(query(playersRef, where('name', '==', trimmedName), where('phone', '==', trimmedPhone)));
-
-      let playerId: string;
-      if (!existingSnap.empty) {
-        const existingDoc = existingSnap.docs[0];
-        playerId = existingDoc.id;
-      } else {
-        const createdRef = await addDoc(playersRef, {
-          name: trimmedName,
-          phone: trimmedPhone,
-          avatar: createInitialsAvatar(trimmedName),
-          status: 'confirmed',
-          summerRankingStartPoints: startPoints,
-          summerRankingJoinedAt: new Date().toISOString(),
-        });
-        playerId = createdRef.id;
-      }
-
-      const createdPlayer: Player = {
-        id: playerId,
-        name: trimmedName,
-        phone: trimmedPhone,
-        avatar: createInitialsAvatar(trimmedName),
-        status: 'confirmed',
-        summerRankingStartPoints: startPoints,
-      };
-
-      await ensureUserForPlayer(playerId, trimmedName);
-      const playerForActions = players.find(player => player.id === playerId) ?? createdPlayer;
-      if (addNewPlayerToRanking) {
-        await addPlayerToRanking(playerForActions, startPoints);
-      }
-      if (selectedEventId) {
-        await addPlayerToEvent(selectedEventId, playerForActions, startPoints);
-      }
-
-      setNewPlayerName('');
-      setNewPlayerPhone('');
-      setNewPlayerStartPoints('0');
+      await createPlayerWithAccount(newPlayerName, newPlayerPhone, Number(newPlayerStartPoints || 0),
+        [...(addNewPlayerToRanking ? [rankingEvent.id] : []), ...(selectedEventId ? [selectedEventId] : [])]);
+      setNewPlayerName(''); setNewPlayerPhone(''); setNewPlayerStartPoints('0');
       setFeedback({ type: 'success', message: 'Giocatore creato correttamente.' });
     } catch (error) {
       console.error('Errore creazione giocatore', error);
-      setFeedback({ type: 'error', message: 'Impossibile creare il giocatore. Riprova.' });
-    } finally {
-      setLoading(false);
-    }
+      setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Giocatore non creato. Riprova.' });
+    } finally { setLoading(false); }
   };
 
   const openEditPlayer = (player: Player) => {
@@ -321,208 +145,46 @@ const AdminPlayersView: React.FC<AdminPlayersViewProps> = ({
   };
 
   const handleSaveEditedPlayer = async () => {
-    if (!editingPlayer) return;
-    const normalizedName = editPlayerName.trim();
-    const normalizedPhone = editPlayerPhone.trim();
-    const normalizedPoints = Number(editPlayerPoints);
-
-    if (!normalizedName) {
-      setFeedback({ type: 'error', message: 'Il nome giocatore è obbligatorio.' });
-      return;
-    }
-    if (!Number.isFinite(normalizedPoints) || normalizedPoints < 0) {
-      setFeedback({ type: 'error', message: 'Il valore del giocatore deve essere un numero valido maggiore o uguale a 0.' });
-      return;
-    }
-
+    if (!editingPlayer || editLoading) return;
     setEditLoading(true);
     try {
-      const joinedAt = editingPlayer.summerRankingJoinedAt ?? new Date().toISOString();
-      await updateDoc(doc(db, 'players', editingPlayer.id), {
-        name: normalizedName,
-        phone: normalizedPhone,
-        summerRankingStartPoints: normalizedPoints,
-        summerRankingJoinedAt: joinedAt,
+      await updatePlayerEverywhere(editingPlayer.id, {
+        name: editPlayerName.trim(), phone: editPlayerPhone.trim(),
+        summerRankingStartPoints: Number(editPlayerPoints),
+        summerRankingJoinedAt: editingPlayer.summerRankingJoinedAt ?? new Date().toISOString()
       });
-
-      const eventsToUpdate = events.filter(event => event.players.some(player => player.id === editingPlayer.id));
-      if (eventsToUpdate.length > 0) {
-        const updatedEvents = events.map(event => ({
-          ...event,
-          players: event.players.map(player =>
-            player.id === editingPlayer.id
-              ? {
-                ...player,
-                name: normalizedName,
-                phone: normalizedPhone,
-                summerRankingStartPoints: normalizedPoints,
-                summerRankingJoinedAt: joinedAt,
-              }
-              : player,
-          ),
-        }));
-
-        setEvents(updatedEvents);
-        await Promise.all(
-          updatedEvents
-            .filter(event => event.players.some(player => player.id === editingPlayer.id))
-            .map(event => updateDoc(doc(db, 'events', event.id), { players: event.players })),
-        );
-      }
-
-      setFeedback({ type: 'success', message: 'Giocatore aggiornato correttamente.' });
       closeEditPlayer();
+      setFeedback({ type: 'success', message: 'Giocatore aggiornato correttamente.' });
     } catch (error) {
       console.error('Errore aggiornamento giocatore', error);
-      setFeedback({ type: 'error', message: 'Errore durante il salvataggio del giocatore.' });
-    } finally {
-      setEditLoading(false);
-    }
+      setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Giocatore non salvato. Riprova.' });
+    } finally { setEditLoading(false); }
   };
 
   const handleRemovePlayerFromRankingEvent = async (player: Player) => {
-    if (!isOrganizer) {
-      setFeedback({ type: 'error', message: 'Solo l’organizzatore può rimuovere i giocatori dal torneo.' });
-      return;
-    }
-    if (removingPlayerId || deletingPlayerId) return;
-
-    const event = events.find(item => item.id === rankingEvent.id) ?? rankingEvent;
-    const result = removePlayerFromRankingEvent(event, player.id);
-
-    if (result.status === 'blocked') {
-      const reason = [
-        result.blockers.includes('matches') ? 'ha già partite registrate in questo torneo' : null,
-        result.blockers.includes('groups') ? 'è già inserito in un girone di questo torneo' : null,
-      ].filter(Boolean).join(' e ');
-      setFeedback({
-        type: 'error',
-        message: `Impossibile rimuovere ${player.name}: ${reason}. Elimina prima i dati collegati per non perdere lo storico.`,
-      });
-      return;
-    }
-    if (result.status === 'not-associated') {
-      setFeedback({ type: 'success', message: `${player.name} non è più associato a questo torneo.` });
-      return;
-    }
-    if (!window.confirm(`Rimuovere ${player.name} solo da questo torneo? Il giocatore resterà nell’archivio globale e negli altri eventi.`)) return;
-
+    if (!isOrganizer || removingPlayerId || deletingPlayerId) return;
+    if (!window.confirm(`Rimuovere ${player.name} solo da questo torneo? Resterà negli altri eventi e nell'archivio globale.`)) return;
     setRemovingPlayerId(player.id);
     try {
-      const nextMaster = removePlayerFromSummerRankingMaster(result.rankingData?.master, player.id);
-      const nextPadelIndividualMaster = removePlayerFromPadelIndividualMaster(result.rankingData?.padelIndividualMaster, player.id);
-      const nextRankingData: SummerRankingData | undefined = result.rankingData
-        ? {
-          ...result.rankingData,
-          master: nextMaster,
-          padelIndividualMaster: nextPadelIndividualMaster,
-        }
-        : undefined;
-
-      await updateDoc(doc(db, 'events', event.id), {
-        players: result.players,
-        ...(nextRankingData ? { rankingData: sanitizeRankingDataForFirestore(nextRankingData, event.eventType) } : {}),
-      });
-
-      setEvents(prev =>
-        prev.map(item => item.id === event.id
-          ? { ...item, players: result.players, ...(nextRankingData ? { rankingData: nextRankingData } : {}) }
-          : item),
-      );
-      setFeedback({
-        type: 'success',
-        message: `${player.name} rimosso da questo torneo; resta disponibile nell’archivio globale.`,
-      });
+      await removePlayerFromRanking(rankingEvent.id, player.id);
+      setFeedback({ type: 'success', message: `${player.name} rimosso da questo torneo.` });
     } catch (error) {
-      console.error('Errore rimozione giocatore dal torneo', error);
-      setFeedback({ type: 'error', message: `Errore durante la rimozione di ${player.name} dal torneo.` });
-    } finally {
-      setRemovingPlayerId(null);
-    }
+      console.error('Errore rimozione giocatore', error);
+      setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Rimozione non riuscita. Riprova.' });
+    } finally { setRemovingPlayerId(null); }
   };
 
   const handleDeletePlayer = async (player: Player) => {
-    if (!window.confirm(`Eliminare definitivamente ${player.name}?`)) return;
+    if (deletingPlayerId || !window.confirm(`Eliminare definitivamente ${player.name}?`)) return;
     setDeletingPlayerId(player.id);
     try {
-      const usersRef = collection(db, 'users');
-      const linkedUsersSnap = await getDocs(query(usersRef, where('playerId', '==', player.id)));
-      await Promise.all(linkedUsersSnap.docs.map(userDoc => deleteDoc(userDoc.ref)));
-      await deleteDoc(doc(db, 'players', player.id));
-
-      const eventsToPersist: Array<{ id: string; players: Player[]; rankingData?: SummerRankingData; eventType?: Event['eventType'] }> = [];
-      const localUpdatesByEventId = new Map<string, { players: Player[]; rankingData?: SummerRankingData }>();
-
-      for (const event of events) {
-        const nextPlayers = event.players.filter(eventPlayer => eventPlayer.id !== player.id);
-        const removedFromPlayers = nextPlayers.length !== event.players.length;
-        const participantIds = Array.isArray(event.rankingData?.participantIds)
-          ? event.rankingData.participantIds.filter(id => id !== player.id)
-          : undefined;
-        const removedFromParticipantIds = participantIds !== undefined
-          && participantIds.length !== (event.rankingData?.participantIds?.length ?? 0);
-        const nextMatches = Array.isArray(event.rankingData?.matches)
-          ? event.rankingData.matches.filter(match => !matchIncludesPlayer(match, player.id))
-          : [];
-        const removedFromMatches = Array.isArray(event.rankingData?.matches)
-          && nextMatches.length !== event.rankingData.matches.length;
-        const nextAvailabilities = { ...(event.rankingData?.availabilities ?? {}) };
-        const hadAvailability = player.id in nextAvailabilities;
-        delete nextAvailabilities[player.id];
-        const nextMaster = removePlayerFromSummerRankingMaster(event.rankingData?.master, player.id);
-        const nextPadelIndividualMaster = removePlayerFromPadelIndividualMaster(event.rankingData?.padelIndividualMaster, player.id);
-        const removedFromMaster = nextMaster !== event.rankingData?.master;
-        const removedFromPadelMaster = nextPadelIndividualMaster !== event.rankingData?.padelIndividualMaster;
-        const rankingChanged = removedFromParticipantIds || removedFromMatches || hadAvailability || removedFromMaster || removedFromPadelMaster;
-
-        if (!removedFromPlayers && !rankingChanged) continue;
-
-        const nextRankingData: SummerRankingData | undefined = event.rankingData
-          ? {
-            ...event.rankingData,
-            participantIds,
-            matches: nextMatches,
-            availabilities: nextAvailabilities,
-            master: nextMaster,
-            padelIndividualMaster: nextPadelIndividualMaster,
-          }
-          : undefined;
-
-        localUpdatesByEventId.set(event.id, { players: nextPlayers, rankingData: nextRankingData });
-        eventsToPersist.push({ id: event.id, players: nextPlayers, rankingData: nextRankingData, eventType: event.eventType });
-      }
-
-      setEvents(prev =>
-        prev.map(event => {
-          const update = localUpdatesByEventId.get(event.id);
-          if (!update) return event;
-          return {
-            ...event,
-            players: update.players,
-            rankingData: update.rankingData,
-          };
-        }),
-      );
-
-      await Promise.all(
-        eventsToPersist.map(event =>
-          updateDoc(doc(db, 'events', event.id), {
-            players: event.players,
-            ...(event.rankingData ? { rankingData: sanitizeRankingDataForFirestore(event.rankingData, event.eventType) } : {}),
-          }),
-        ),
-      );
-
-      if (editingPlayer?.id === player.id) {
-        closeEditPlayer();
-      }
+      await deletePlayerEverywhere(player.id);
+      if (editingPlayer?.id === player.id) closeEditPlayer();
       setFeedback({ type: 'success', message: `${player.name} eliminato correttamente.` });
     } catch (error) {
       console.error('Errore eliminazione giocatore', error);
-      setFeedback({ type: 'error', message: `Errore durante l'eliminazione di ${player.name}.` });
-    } finally {
-      setDeletingPlayerId(null);
-    }
+      setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Eliminazione non riuscita. Riprova.' });
+    } finally { setDeletingPlayerId(null); }
   };
 
   return (

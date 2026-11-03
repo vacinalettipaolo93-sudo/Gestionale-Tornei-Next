@@ -2,18 +2,7 @@ import { type Event, type Match, type SummerRankingData } from '../types';
 import { getMatchParticipantIds, matchIncludesPlayer, normalizeRankingData, sanitizeRankingDataForFirestore } from './rankingEvent';
 import { type BookingActor } from './tournamentBooking';
 import { validateMatchScores } from './tournamentResults';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-const equal = (left: unknown, right: unknown): boolean => {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((item, index) => equal(item, right[index]));
-  if (isRecord(left) && isRecord(right)) {
-    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])];
-    return keys.every(key => equal(left[key], right[key]));
-  }
-  return false;
-};
+import { isRecord, sameData as equal } from './documentChanges';
 const conflict = () => { throw new Error('Dati modificati da un altro utente. Riapri la modifica e riprova.'); };
 
 export function assertRankingMatchUnchanged(expected: Match | null, actual: Match | undefined): void {

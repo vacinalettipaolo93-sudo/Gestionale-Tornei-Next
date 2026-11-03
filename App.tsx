@@ -1,38 +1,38 @@
+import { updatePlayerEverywhere } from './utils/updatePlayerProfile';
 // App.tsx
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { type Event, type Tournament, type User, type Player, type SummerRankingData } from './types';
-import EventView from './components/EventView';
-import ExpiredSlotCleanup from './components/ExpiredSlotCleanup';
-import { useSectionScroll } from './components/useSectionScroll';
-import { saveRankingChanges } from './services/rankingDataService';
-import TournamentView from './components/TournamentView';
-import Login from './components/Login';
-import EditProfileModal from './components/EditProfileModal';
-import ParticipantDashboard from './components/ParticipantDashboard';
-import ContactModal from './components/ContactModal';
-import SummerRankingView from './components/SummerRankingView';
-import PadelIndividualRankingView from './components/PadelIndividualRankingView';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminPlayersView from './components/AdminPlayersView';
 import AdminUsersModal from './components/AdminUsersModal';
-import { BackArrowIcon, NextTsBrandIcon, PencilIcon, PlusIcon, TrashIcon, UserCircleIcon, LogoutIcon } from './components/Icons';
+import ContactModal from './components/ContactModal';
+import EditProfileModal from './components/EditProfileModal';
+import EventView from './components/EventView';
+import ExpiredSlotCleanup from './components/ExpiredSlotCleanup';
+import { BackArrowIcon, LogoutIcon, NextTsBrandIcon, PencilIcon, PlusIcon, TrashIcon, UserCircleIcon } from './components/Icons';
+import Login from './components/Login';
+import PadelIndividualRankingView from './components/PadelIndividualRankingView';
+import ParticipantDashboard from './components/ParticipantDashboard';
+import SummerRankingView from './components/SummerRankingView';
+import TournamentView from './components/TournamentView';
+import { useSectionScroll } from './components/useSectionScroll';
+import { saveRankingChanges } from './services/rankingDataService';
+import { type Event, type Player, type SummerRankingData, type Tournament, type User } from './types';
 
+import { addDoc, collection, deleteDoc, doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, getDoc } from "firebase/firestore";
-import { calculateSummerRanking, normalizeRulesConfig } from './utils/summerRanking';
+import {
+  EVENT_SPORTS, filterAdminEvents, getConcludedYears, getEventYear,
+  type EventCategory, type EventPhase,
+} from './utils/adminEventFilters';
+import { clearPersistedAuthSession, getAuthSessionStorage, persistAuthSession, resolvePersistedAuthUser } from './utils/authSession.js';
 import { calculatePadelIndividualRanking } from './utils/padelIndividualRanking';
 import {
   createEmptyRankingData,
   getEventType,
   getRankingEventLabel,
   isRankingEventType,
-  normalizeRankingData,
-  sanitizeRankingDataForFirestore,
+  normalizeRankingData
 } from './utils/rankingEvent';
-import {
-  EVENT_SPORTS, filterAdminEvents, getConcludedYears, getEventYear,
-  type EventCategory, type EventPhase,
-} from './utils/adminEventFilters';
-import { clearPersistedAuthSession, getAuthSessionStorage, persistAuthSession, resolvePersistedAuthUser } from './utils/authSession.js';
+import { calculateSummerRanking, normalizeRulesConfig } from './utils/summerRanking';
 
 type View = 'dashboard' | 'event' | 'tournament' | 'playersAdmin';
 type EventType = NonNullable<Event['eventType']>;
@@ -68,6 +68,8 @@ const App: React.FC = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
   const [eventsError, setEventsError] = useState(false);
+  const [syncErrors, setSyncErrors] = useState<Record<string, string>>({});
+  const [syncPending, setSyncPending] = useState<Record<string, boolean>>({});
   const [adminFilters, setAdminFilters] = useState(readAdminFilters);
   const [players, setPlayers] = useState<Player[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -135,7 +137,17 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const unsubEvents = onSnapshot(collection(db, "events"), snapshot => {
+    const reportSnapshot = (source: string, metadata: { hasPendingWrites: boolean; fromCache: boolean }) => {
+      setSyncErrors(previous => ({ ...previous, [source]: '' }));
+      setSyncPending(previous => ({ ...previous, [source]: metadata.hasPendingWrites || metadata.fromCache }));
+      return !metadata.hasPendingWrites;
+    };
+    const reportError = (source: string, error: unknown) => {
+      console.error(`Errore sincronizzazione ${source}`, error);
+      setSyncErrors(previous => ({ ...previous, [source]: `Sincronizzazione ${source} interrotta. Ricarica la pagina per riprovare.` }));
+    };
+    const unsubEvents = onSnapshot(collection(db, "events"), { includeMetadataChanges: true }, snapshot => {
+      if (!reportSnapshot('eventi', snapshot.metadata)) return;
       const nextEvents = snapshot.docs.map(snapshotDoc => {
         const raw = snapshotDoc.data() as Partial<Event>;
         const eventType = getEventType(raw);
@@ -156,39 +168,40 @@ const App: React.FC = () => {
       setEventsLoaded(true);
     }, error => {
       console.error('Errore lettura eventi', error);
+      reportError('eventi', error);
       setEventsError(true);
       setEventsLoaded(true);
     });
-    const unsubPlayers = onSnapshot(collection(db, "players"), snapshot => {
-      setPlayers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player)));
-    });
+    const unsubPlayers = onSnapshot(collection(db, "players"), { includeMetadataChanges: true }, snapshot => {
+      if (!reportSnapshot('giocatori', snapshot.metadata)) return;
+      setPlayers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Player)));
+    }, error => reportError('giocatori', error));
     const unsubUsers = onSnapshot(
       collection(db, "users"),
+      { includeMetadataChanges: true },
       snapshot => {
-        setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+        if (!reportSnapshot('utenti', snapshot.metadata)) return;
+        // Do not invalidate a persisted session using an incomplete offline cache.
+        if (snapshot.metadata.fromCache) return;
+        setUsers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as User)));
         setIsUsersLoaded(true);
       },
       error => {
-        console.error('Errore lettura utenti', error);
-        setUsers([]);
-        setIsUsersLoaded(true);
+        reportError('utenti', error);
       },
     );
 
-    void getDoc(doc(db, "summerRankingNext", "main"))
-      .then(snapshot => {
-        if (!snapshot.exists()) return;
-        const data = snapshot.data() as SummerRankingData | undefined;
-        setLegacySummerRanking(normalizeRankingData(data, 'ranking_singolare'));
-      })
-      .catch(error => {
-        console.error('Errore lettura fallback Summer Ranking Next', error);
-      });
+    const unsubLegacy = onSnapshot(doc(db, "summerRankingNext", "main"), snapshot => {
+      setLegacySummerRanking(snapshot.exists() ? normalizeRankingData(snapshot.data() as SummerRankingData, 'ranking_singolare') : null);
+    }, error => {
+      console.error('Errore lettura fallback Summer Ranking Next', error);
+    });
 
     return () => {
       unsubEvents();
       unsubPlayers();
       unsubUsers();
+      unsubLegacy();
     };
   }, []);
 
@@ -260,40 +273,11 @@ const App: React.FC = () => {
   };
 
   const updatePlayerSummerRankingStartPoints = async (playerId: string, points: number) => {
-    const currentPlayer = players.find(player => player.id === playerId);
-    const payload: Partial<Player> = {
-      summerRankingStartPoints: points,
-      summerRankingJoinedAt: currentPlayer?.summerRankingJoinedAt ?? new Date().toISOString(),
+      const player = players.find(item => item.id === playerId);
+      await updatePlayerEverywhere(playerId, {
+        summerRankingStartPoints: points, summerRankingJoinedAt: player?.summerRankingJoinedAt ?? new Date().toISOString(),
+      });
     };
-
-    setPlayers(prevPlayers => prevPlayers.map(player =>
-      player.id === playerId ? { ...player, ...payload } : player
-    ));
-
-    // Also update event.players so SummerRankingView (which receives currentEventState.players) reflects the change immediately
-    const eventsToPersist = events
-      .filter(event => event.players.some(eventPlayer => eventPlayer.id === playerId))
-      .map(event => ({
-        id: event.id,
-        players: event.players.map(eventPlayer =>
-          eventPlayer.id === playerId
-            ? { ...eventPlayer, summerRankingStartPoints: points }
-            : eventPlayer,
-        ),
-      }));
-
-    if (eventsToPersist.length > 0) {
-      setEvents(prev =>
-        prev.map(event => {
-          const update = eventsToPersist.find(item => item.id === event.id);
-          return update ? { ...event, players: update.players } : event;
-        }),
-      );
-      await Promise.all(eventsToPersist.map(event => updateDoc(doc(db, 'events', event.id), { players: event.players })));
-    }
-
-    await updateDoc(doc(db, "players", playerId), payload);
-  };
 
   const resetCreateEventForm = () => {
     setNewEventName('');
@@ -354,14 +338,18 @@ const App: React.FC = () => {
   };
 
   const handleDeleteEvent = async () => {
-    if (!eventToDelete) return;
-    await deleteDoc(doc(db, "events", eventToDelete.id));
-    if (selectedEvent?.id === eventToDelete.id) {
-      setSelectedEvent(null);
-      setCurrentView('dashboard');
-    }
-    setEventToDelete(null);
-  };
+      if (!eventToDelete) return;
+      try {
+        await deleteDoc(doc(db, "events", eventToDelete.id));
+        if (selectedEvent?.id === eventToDelete.id) {
+          setSelectedEvent(null); setSelectedTournament(null); setCurrentView('dashboard');
+        }
+        setEventToDelete(null);
+      } catch (error) {
+        console.error('Errore eliminazione evento', error);
+        alert("Evento non eliminato. Controlla la connessione e riprova.");
+      }
+    };
 
   const openRenameModal = (event: Event) => {
     setEventToRename(event);
@@ -414,6 +402,15 @@ const App: React.FC = () => {
   const currentEventState = useMemo(() => events.find(e => e.id === selectedEvent?.id), [events, selectedEvent]);
   const currentTournamentState = useMemo(() => currentEventState?.tournaments.find(t => t.id === selectedTournament?.id), [currentEventState, selectedTournament]);
 
+  useEffect(() => {
+    if (!eventsLoaded || eventsError || syncPending.eventi) return;
+    if (selectedEvent && !currentEventState) resetNavigationState();
+    else if (currentView === 'tournament' && selectedTournament && !currentTournamentState) {
+      setSelectedTournament(null);
+      setCurrentView('event');
+    }
+  }, [eventsLoaded, eventsError, syncPending.eventi, selectedEvent, selectedTournament, currentEventState, currentTournamentState, currentView, resetNavigationState]);
+
   const filteredEventsForOrganizer = useMemo(() =>
     isOrganizer && adminFilters.sport
       ? filterAdminEvents(events, adminFilters.sport, adminFilters.category, adminFilters.phase)
@@ -428,10 +425,21 @@ const App: React.FC = () => {
   ), [filteredEventsForOrganizer, adminFilters]);
   const ongoingEvents = adminFilters.phase === 'ongoing' ? visibleEvents : [];
   const concludedEvents = adminFilters.phase === 'concluded' ? visibleEvents : [];
+  const syncNotice = Object.values(syncErrors).some(Boolean) ? (
+    <div role="alert" className="bg-red-900/40 border border-red-400 rounded-lg p-3 mb-4">
+      {Object.values(syncErrors).filter(Boolean).map(message => <p key={message}>{message}</p>)}
+      <button type="button" onClick={() => window.location.reload()} className="underline mt-2">Riprova sincronizzazione</button>
+    </div>
+  ) : Object.values(syncPending).some(Boolean) && (
+    <p role="status" className="bg-secondary rounded-lg p-3 mb-4">
+      Sincronizzazione Firebase in corso. I dati potrebbero non essere ancora aggiornati; attendi la conferma dei salvataggi.
+    </p>
+  );
 
   if (!isAuthBootstrapComplete) {
     return (
       <div className="min-h-screen bg-primary text-text-primary flex flex-col items-center justify-center p-4 animate-fadeIn">
+        {syncNotice}
         <div className="w-full max-w-sm bg-secondary p-8 rounded-xl shadow-2xl border border-tertiary/50 text-center">
           <h2 className="text-xl font-bold mb-2">Ripristino sessione</h2>
           <p className="text-text-secondary">Controllo accesso in corso...</p>
@@ -441,7 +449,7 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
-    return <Login users={users} onLoginSuccess={handleLoginSuccess} />;
+    return <>{syncNotice}<Login users={users} onLoginSuccess={handleLoginSuccess} /></>;
   }
 
   const renderContent = () => {
@@ -798,7 +806,6 @@ const App: React.FC = () => {
       );
     }
 
-
     if (currentView === 'event' && currentEventState) {
       if (getEventType(currentEventState) === 'ranking_singolare') {
         const rankingData = getEventRankingData(currentEventState);
@@ -894,6 +901,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen min-w-0 bg-primary text-text-primary p-3 sm:p-6 lg:p-8">
+      {syncNotice}
       {events.filter(event => isOrganizer || event.players.some(player => player.id === loggedInPlayerId)).map(event => (
         <ExpiredSlotCleanup key={event.id} event={event} isOrganizer={isOrganizer} playerId={loggedInPlayerId} />
       ))}

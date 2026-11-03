@@ -1,20 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RankingMatchFinder } from './MatchFinder';
-import CenteredDialog from './CenteredDialog';
-import MatchScoreFields from './MatchScoreFields';
-import { useSectionScroll } from './useSectionScroll';
-import { validateMatchScores } from '../utils/tournamentResults';
-import { assertRankingMatchUnchanged } from '../utils/rankingChanges';
 import {
-  type SummerAvailabilityByDay,
-  type SummerAvailabilityStatus,
   type DrawMode,
   type Match,
   type Player,
   type PlayoffBracket,
+  type SummerAvailabilityByDay,
   type SummerAvailabilityDay,
   type SummerAvailabilityPeriod,
+  type SummerAvailabilityStatus,
   type SummerPlayerAvailability,
   type SummerPlayerAvailabilityEntry,
   type SummerRankingData,
@@ -24,25 +18,25 @@ import {
   type SummerRankingRulesConfig,
   type TimeSlot,
 } from '../types';
-import { ArrowDownIcon, ArrowUpIcon, PhoneIcon, PlusIcon, TrashIcon, WhatsAppIcon } from './Icons';
+import { assertRankingMatchUnchanged } from '../utils/rankingChanges';
 import {
-  SUMMER_RANKING_NAME,
   calculateSummerRanking,
   calculateSummerRankingMatchBreakdowns,
   createSummerRankingMasterData,
   generateRulesText,
-  getSummerRankingAutoQualifiedPlayerIds,
   getEligibleOpponents,
   getHeadToHeadCount,
+  getSummerRankingAutoQualifiedPlayerIds,
   getSummerRankingDiffBand,
+  getSummerRankingLossPoints,
   getSummerRankingMasterFormat,
   getSummerRankingMasterQualifiedPlayerIds,
-  getSummerRankingLossPoints,
   getSummerRankingWinPoints,
   normalizeRulesConfig,
   recomputeSummerRankingMasterBracket,
-  resetSummerRankingMasterData,
   removePlayerFromSummerRankingMaster,
+  resetSummerRankingMasterData,
+  SUMMER_RANKING_NAME,
   syncSummerRankingMasterMatches,
   updateSummerRankingMasterBracketParticipants,
 } from '../utils/summerRanking';
@@ -53,6 +47,13 @@ import {
   SUMMER_RANKING_ROW_SCROLL_MARGIN,
   waitForSummerRankingScrollTarget,
 } from '../utils/summerRankingAutoScroll';
+import { validateMatchScores } from '../utils/tournamentResults';
+import CenteredDialog from './CenteredDialog';
+import { ArrowDownIcon, ArrowUpIcon, PhoneIcon, PlusIcon, WhatsAppIcon } from './Icons';
+import { RankingMatchFinder } from './MatchFinder';
+import MatchScoreFields from './MatchScoreFields';
+import { PersistenceFeedback, usePersistenceAction } from './usePersistenceAction';
+import { useSectionScroll } from './useSectionScroll';
 
 // Portal renders children directly in document.body, bypassing any ancestor CSS transforms
 // (such as animate-fadeIn) that would otherwise break position:fixed modal centering.
@@ -537,6 +538,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   description,
   playersAdminLabel,
 }) => {
+  const persistence = usePersistenceAction();
   const [activeTab, setActiveTab] = useState<RankingTab>('ranking');
   const sectionRef = useSectionScroll(activeTab);
   const [slotForm, setSlotForm] = useState({ start: '', location: '', field: '' });
@@ -800,55 +802,61 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   }, [masterMatches]);
 
   const handleAddSlot = async () => {
-    if (!slotForm.start || !slotForm.location.trim()) return;
-    const nextSlot: TimeSlot = {
-      id: generateId('slot'),
-      start: slotForm.start,
-      location: slotForm.location.trim(),
-      field: slotForm.field.trim(),
-    };
-    await onSaveRankingData({
-      ...rankingData,
-      slots: [...rankingData.slots, nextSlot],
+    await persistence.run(async () => {
+      if (!slotForm.start || !slotForm.location.trim()) return;
+      const nextSlot: TimeSlot = {
+        id: generateId('slot'),
+        start: slotForm.start,
+        location: slotForm.location.trim(),
+        field: slotForm.field.trim(),
+      };
+      await onSaveRankingData({
+        ...rankingData,
+        slots: [...rankingData.slots, nextSlot],
+      });
     });
   };
 
   const handleDeleteSlot = async (slotId: string) => {
-    await onSaveRankingData({
-      ...rankingData,
-      slots: rankingData.slots.filter(slot => slot.id !== slotId),
+    await persistence.run(async () => {
+      await onSaveRankingData({
+        ...rankingData,
+        slots: rankingData.slots.filter(slot => slot.id !== slotId),
+      });
     });
   };
 
   const handleCreateBookedMatch = async () => {
-    const slot = availableSlots.find(item => item.id === bookingForm.slotId);
-    if (!slot) return;
+    await persistence.run(async () => {
+      const slot = availableSlots.find(item => item.id === bookingForm.slotId);
+      if (!slot) return;
 
-    const participantIds = isOrganizer && !loggedInPlayerId
-      ? [bookingForm.player1Id, bookingForm.player2Id]
-      : [loggedInPlayerId ?? '', bookingForm.opponentId];
+      const participantIds = isOrganizer && !loggedInPlayerId
+        ? [bookingForm.player1Id, bookingForm.player2Id]
+        : [loggedInPlayerId ?? '', bookingForm.opponentId];
 
-    if (!participantIds[0] || !participantIds[1] || participantIds[0] === participantIds[1]) return;
-    if (getHeadToHeadCount(rankingData.matches, participantIds[0], participantIds[1]) >= effectiveConfig.headToHeadLimit) return;
+      if (!participantIds[0] || !participantIds[1] || participantIds[0] === participantIds[1]) return;
+      if (getHeadToHeadCount(rankingData.matches, participantIds[0], participantIds[1]) >= effectiveConfig.headToHeadLimit) return;
 
-    const nextMatch: Match = {
-      id: generateId('srn-match'),
-      player1Id: participantIds[0],
-      player2Id: participantIds[1],
-      score1: null,
-      score2: null,
-      status: 'scheduled',
-      scheduledTime: slot.start,
-      location: slot.location,
-      field: slot.field,
-      slotId: slot.id,
-    };
+      const nextMatch: Match = {
+        id: generateId('srn-match'),
+        player1Id: participantIds[0],
+        player2Id: participantIds[1],
+        score1: null,
+        score2: null,
+        status: 'scheduled',
+        scheduledTime: slot.start,
+        location: slot.location,
+        field: slot.field,
+        slotId: slot.id,
+      };
 
-    await onSaveRankingData({
-      ...rankingData,
-      matches: [...rankingData.matches, nextMatch],
+      await onSaveRankingData({
+        ...rankingData,
+        matches: [...rankingData.matches, nextMatch],
+      });
+      setBookingForm({ slotId: '', opponentId: '', player1Id: '', player2Id: '' });
     });
-    setBookingForm({ slotId: '', opponentId: '', player1Id: '', player2Id: '' });
   };
 
   const openEditResult = (match: Match) => {
@@ -1114,73 +1122,79 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const persistMasterQualifiedPlayers = async (qualifiedPlayerIds: string[]) => {
-    const normalizedQualifiedPlayerIds = normalizeMasterDraftSelection(
-      qualifiedPlayerIds,
-      new Set(masterCandidatePlayers.map(player => player.id)),
-      effectiveConfig.masterSize,
-    );
-    if (!normalizedQualifiedPlayerIds) return;
+    await persistence.run(async () => {
+      const normalizedQualifiedPlayerIds = normalizeMasterDraftSelection(
+        qualifiedPlayerIds,
+        new Set(masterCandidatePlayers.map(player => player.id)),
+        effectiveConfig.masterSize,
+      );
+      if (!normalizedQualifiedPlayerIds) return;
 
-    const manualQualifiedPlayerIds = arraysEqual(normalizedQualifiedPlayerIds, autoQualifiedPlayerIds)
-      ? undefined
-      : normalizedQualifiedPlayerIds;
+      const manualQualifiedPlayerIds = arraysEqual(normalizedQualifiedPlayerIds, autoQualifiedPlayerIds)
+        ? undefined
+        : normalizedQualifiedPlayerIds;
 
-    const shouldRebuildGeneratedMaster = isMasterGenerated &&
-      (masterFormatDraft !== 'bracket' || isSupportedMasterBracketSize(normalizedQualifiedPlayerIds.length));
-    const nextMaster = shouldRebuildGeneratedMaster
-      ? createSummerRankingMasterData(
-        normalizedQualifiedPlayerIds,
-        manualQualifiedPlayerIds,
-        rankingData.master?.matches ?? [],
-        masterFormatDraft,
-      )
-      : {
-        ...rankingData.master,
-        manualQualifiedPlayerIds,
-      };
+      const shouldRebuildGeneratedMaster = isMasterGenerated &&
+        (masterFormatDraft !== 'bracket' || isSupportedMasterBracketSize(normalizedQualifiedPlayerIds.length));
+      const nextMaster = shouldRebuildGeneratedMaster
+        ? createSummerRankingMasterData(
+          normalizedQualifiedPlayerIds,
+          manualQualifiedPlayerIds,
+          rankingData.master?.matches ?? [],
+          masterFormatDraft,
+        )
+        : {
+          ...rankingData.master,
+          manualQualifiedPlayerIds,
+        };
 
-    await onSaveRankingData({
-      ...rankingData,
-      master: nextMaster,
+      await onSaveRankingData({
+        ...rankingData,
+        master: nextMaster,
+      });
     });
   };
 
   const handleGenerateMaster = async () => {
-    const normalizedQualifiedPlayerIds = normalizeMasterDraftSelection(
-      masterQualifiedDraft,
-      new Set(masterCandidatePlayers.map(player => player.id)),
-      effectiveConfig.masterSize,
-    );
-    if (!isOrganizer || !normalizedQualifiedPlayerIds) return;
-    if (masterFormatDraft === 'bracket' && !isSupportedMasterBracketSize(normalizedQualifiedPlayerIds.length)) return;
+    await persistence.run(async () => {
+      const normalizedQualifiedPlayerIds = normalizeMasterDraftSelection(
+        masterQualifiedDraft,
+        new Set(masterCandidatePlayers.map(player => player.id)),
+        effectiveConfig.masterSize,
+      );
+      if (!isOrganizer || !normalizedQualifiedPlayerIds) return;
+      if (masterFormatDraft === 'bracket' && !isSupportedMasterBracketSize(normalizedQualifiedPlayerIds.length)) return;
 
-    const manualQualifiedPlayerIds = arraysEqual(normalizedQualifiedPlayerIds, autoQualifiedPlayerIds)
-      ? undefined
-      : normalizedQualifiedPlayerIds;
-    const nextMaster = createSummerRankingMasterData(
-      normalizedQualifiedPlayerIds,
-      manualQualifiedPlayerIds,
-      [],
-      masterFormatDraft,
-    );
+      const manualQualifiedPlayerIds = arraysEqual(normalizedQualifiedPlayerIds, autoQualifiedPlayerIds)
+        ? undefined
+        : normalizedQualifiedPlayerIds;
+      const nextMaster = createSummerRankingMasterData(
+        normalizedQualifiedPlayerIds,
+        manualQualifiedPlayerIds,
+        [],
+        masterFormatDraft,
+      );
 
-    await onSaveRankingData({
-      ...rankingData,
-      master: nextMaster,
+      await onSaveRankingData({
+        ...rankingData,
+        master: nextMaster,
+      });
     });
   };
 
   const handleResetMaster = async () => {
-    if (!isOrganizer || !isMasterGenerated) return;
+    await persistence.run(async () => {
+      if (!isOrganizer || !isMasterGenerated) return;
 
-    await onSaveRankingData({
-      ...rankingData,
-      master: resetSummerRankingMasterData(rankingData.master, masterFormat),
+      await onSaveRankingData({
+        ...rankingData,
+        master: resetSummerRankingMasterData(rankingData.master, masterFormat),
+      });
+
+      setEditingMasterMatchId(null);
+      setMasterScoreForm({ matchId: null, score1: '', score2: '' });
+      closeEditMasterPlayers();
     });
-
-    setEditingMasterMatchId(null);
-    setMasterScoreForm({ matchId: null, score1: '', score2: '' });
-    closeEditMasterPlayers();
   };
 
   const canManageMasterMatch = (match: SummerRankingMasterMatch) =>
@@ -1223,55 +1237,59 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const handleSaveMasterPlayers = async (match: SummerRankingMasterMatch) => {
-    if (!isOrganizer || masterFormat !== 'bracket' || !rankingData.master?.bracket || !rankingData.master?.matches) return;
-    const result = updateSummerRankingMasterBracketParticipants({
-      bracket: rankingData.master.bracket,
-      matchId: match.id,
-      player1Id: parseMasterPlayerDraftValue(masterPlayersForm.player1Id),
-      player2Id: parseMasterPlayerDraftValue(masterPlayersForm.player2Id),
-      validPlayerIds: masterCandidatePlayers.map(player => player.id),
+    await persistence.run(async () => {
+      if (!isOrganizer || masterFormat !== 'bracket' || !rankingData.master?.bracket || !rankingData.master?.matches) return;
+      const result = updateSummerRankingMasterBracketParticipants({
+        bracket: rankingData.master.bracket,
+        matchId: match.id,
+        player1Id: parseMasterPlayerDraftValue(masterPlayersForm.player1Id),
+        player2Id: parseMasterPlayerDraftValue(masterPlayersForm.player2Id),
+        validPlayerIds: masterCandidatePlayers.map(player => player.id),
+      });
+
+      if (!result.bracket) {
+        setMasterPlayersForm(previous => ({
+          ...previous,
+          error: result.error ?? 'Salvataggio non riuscito. Riprova.',
+        }));
+        return;
+      }
+
+      const nextMaster = rebuildMasterState(
+        result.bracket,
+        rankingData.master.matches,
+        rankingData.master.generatedQualifiedPlayerIds ?? [],
+        rankingData.master.manualQualifiedPlayerIds,
+        rankingData.master.generatedAt,
+      );
+
+      await onSaveRankingData({
+        ...rankingData,
+        master: nextMaster,
+      });
+
+      closeEditMasterPlayers();
     });
-
-    if (!result.bracket) {
-      setMasterPlayersForm(previous => ({
-        ...previous,
-        error: result.error ?? 'Salvataggio non riuscito. Riprova.',
-      }));
-      return;
-    }
-
-    const nextMaster = rebuildMasterState(
-      result.bracket,
-      rankingData.master.matches,
-      rankingData.master.generatedQualifiedPlayerIds ?? [],
-      rankingData.master.manualQualifiedPlayerIds,
-      rankingData.master.generatedAt,
-    );
-
-    await onSaveRankingData({
-      ...rankingData,
-      master: nextMaster,
-    });
-
-    closeEditMasterPlayers();
   };
 
   const handleScheduleMasterMatch = async (match: SummerRankingMasterMatch) => {
-    const slotId = masterBookingSlotIdByMatch[match.id];
-    const slot = availableSlots.find(item => item.id === slotId);
-    if (!slot || !canManageMasterMatch(match) || !rankingData.master?.matches) return;
+    await persistence.run(async () => {
+      const slotId = masterBookingSlotIdByMatch[match.id];
+      const slot = availableSlots.find(item => item.id === slotId);
+      if (!slot || !canManageMasterMatch(match) || !rankingData.master?.matches) return;
 
-    await onSaveRankingData({
-      ...rankingData,
-      master: {
-        ...rankingData.master,
-        matches: rankingData.master.matches.map(item =>
-          item.id === match.id ? getOperationalMatchStatus(item, slot) : item
-        ),
-      },
+      await onSaveRankingData({
+        ...rankingData,
+        master: {
+          ...rankingData.master,
+          matches: rankingData.master.matches.map(item =>
+            item.id === match.id ? getOperationalMatchStatus(item, slot) : item
+          ),
+        },
+      });
+
+      setMasterBookingSlotIdByMatch(previous => ({ ...previous, [match.id]: '' }));
     });
-
-    setMasterBookingSlotIdByMatch(previous => ({ ...previous, [match.id]: '' }));
   };
 
   const openEditMasterResult = (match: SummerRankingMasterMatch) => {
@@ -1566,23 +1584,27 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
   };
 
   const handleAddParticipant = async (playerId: string) => {
-    if (!isOrganizer || rankingParticipantIdSet.has(playerId)) return;
-    await onSaveRankingData({
-      ...rankingData,
-      participantIds: [...rankingParticipantIds, playerId],
+    await persistence.run(async () => {
+      if (!isOrganizer || rankingParticipantIdSet.has(playerId)) return;
+      await onSaveRankingData({
+        ...rankingData,
+        participantIds: [...rankingParticipantIds, playerId],
+      });
     });
   };
 
   const handleRemoveParticipant = async (playerId: string) => {
-    if (!isOrganizer || !rankingParticipantIdSet.has(playerId)) return;
-    const nextAvailabilities = { ...(rankingData.availabilities ?? {}) };
-    delete nextAvailabilities[playerId];
-    await onSaveRankingData({
-      ...rankingData,
-      participantIds: rankingParticipantIds.filter(id => id !== playerId),
-      matches: rankingData.matches.filter(match => match.player1Id !== playerId && match.player2Id !== playerId),
-      availabilities: nextAvailabilities,
-      master: removePlayerFromSummerRankingMaster(rankingData.master, playerId),
+    await persistence.run(async () => {
+      if (!isOrganizer || !rankingParticipantIdSet.has(playerId)) return;
+      const nextAvailabilities = { ...(rankingData.availabilities ?? {}) };
+      delete nextAvailabilities[playerId];
+      await onSaveRankingData({
+        ...rankingData,
+        participantIds: rankingParticipantIds.filter(id => id !== playerId),
+        matches: rankingData.matches.filter(match => match.player1Id !== playerId && match.player2Id !== playerId),
+        availabilities: nextAvailabilities,
+        master: removePlayerFromSummerRankingMaster(rankingData.master, playerId),
+      });
     });
   };
 
@@ -1717,7 +1739,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
     setFilterAvailPeriods([]);
   };
 
-  return (
+  return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
     <div ref={sectionRef} className="min-w-0 space-y-4 sm:space-y-6 scroll-mt-4">
       <div className="bg-secondary rounded-xl shadow-lg p-4 sm:p-6">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -1784,7 +1806,6 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
               Contatta circolo
             </a>
           </div>
-
 
           <div className="bg-secondary rounded-xl shadow-lg p-5 space-y-4">
             <div className="flex flex-col gap-1">
@@ -4653,7 +4674,7 @@ const SummerRankingView: React.FC<SummerRankingViewProps> = ({
       )}
 
     </div>
-  );
+  )}</React.Fragment>;
 };
 
 export default SummerRankingView;

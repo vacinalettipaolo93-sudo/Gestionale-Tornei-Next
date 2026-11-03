@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { type Event, type Tournament, type Player, type PlayoffBracket, type PlayoffMatch, type Match } from '../types';
-import { calculateStandings } from '../utils/standings';
-import { db } from "../firebase";
-import { updateDoc, doc } from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from 'react';
+import { saveEventChanges } from '../services/eventDataService';
+import { type Event, type Match, type Player, type PlayoffBracket, type PlayoffMatch, type Tournament } from '../types';
 import { getTournamentCompetitors } from '../utils/padel';
+import { calculateStandings } from '../utils/standings';
+import { PersistenceFeedback, usePersistenceAction } from './usePersistenceAction';
 
 interface PlayoffsProps {
   event: Event;
@@ -37,6 +37,7 @@ function buildLeagueMatchFromPlayoffMatch(pm: PlayoffMatch): Match | null {
 }
 
 const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrganizer, loggedInPlayerId, onEditResult }) => {
+    const persistence = usePersistenceAction();
   const tt = tournament as TournamentWithWithdrawals;
   const competitors = useMemo(() => getTournamentCompetitors(event, tournament), [event.players, tournament]);
 
@@ -117,11 +118,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
       t.id === tournament.id ? ({ ...t, playoffWithdrawals: nextWithdrawals } as any) : t
     );
 
-    setEvents(prev =>
-      prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e)
-    );
-
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
+    await saveEventChanges(event, { tournaments: updatedTournaments });
   };
 
   const handleAddWithdrawal = async () => {
@@ -183,128 +180,125 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
   };
 
   const handleGenerateBracket = async () => {
-    if (firstRoundAssignments.some(a => a === null)) {
-      alert("Per favore, riempi tutti gli slot del primo turno.");
-      return;
-    }
-
-    const newMatches: PlayoffMatch[] = [];
-    const numRounds = Math.log2(bracketSize);
-    let matchCounter = 0;
-
-    for (let round = 1; round <= numRounds; round++) {
-      const matchesInRound = bracketSize / (2 ** round);
-      for (let i = 0; i < matchesInRound; i++) {
-        newMatches.push({
-          id: `plm-${matchCounter}`, round, matchIndex: matchCounter,
-          player1Id: null, player2Id: null, score1: null, score2: null,
-          winnerId: null, nextMatchId: null,
-          loserGoesToBronzeFinal: round === numRounds - 1,
-        });
-        matchCounter++;
+    await persistence.run(async () => {
+      if (firstRoundAssignments.some(a => a === null)) {
+        alert("Per favore, riempi tutti gli slot del primo turno.");
+        return;
       }
-    }
 
-    newMatches.forEach(match => {
-      if (match.round < numRounds) {
-        const roundMatches = newMatches.filter(m => m.round === match.round);
-        const matchIndexInRound = roundMatches.findIndex(m => m.id === match.id);
-        const nextRoundMatches = newMatches.filter(m => m.round === match.round + 1);
-        const nextMatch = nextRoundMatches[Math.floor(matchIndexInRound / 2)];
-        if (nextMatch) match.nextMatchId = nextMatch.id;
-      }
-    });
+      const newMatches: PlayoffMatch[] = [];
+      const numRounds = Math.log2(bracketSize);
+      let matchCounter = 0;
 
-    let bronzeFinalId: string | null = null;
-    if (bracketSize > 2 && tournament.settings.hasBronzeFinal) {
-      const bronzeMatch: PlayoffMatch = {
-        id: `plm-bronze`, isBronzeFinal: true, round: numRounds, matchIndex: 999,
-        player1Id: null, player2Id: null, score1: null, score2: null, winnerId: null, nextMatchId: null
-      };
-      newMatches.push(bronzeMatch);
-      bronzeFinalId = bronzeMatch.id;
-    }
-
-    const firstRoundMatches = newMatches.filter(m => m.round === 1 && !m.isBronzeFinal);
-    firstRoundMatches.forEach((match, i) => {
-      const p1Id = firstRoundAssignments[i * 2];
-      const p2Id = firstRoundAssignments[i * 2 + 1];
-      const isP1Bye = p1Id === 'BYE';
-      const isP2Bye = p2Id === 'BYE';
-
-      match.player1Id = isP1Bye ? null : p1Id;
-      match.player2Id = isP2Bye ? null : p2Id;
-
-      let winnerId: string | null = null;
-      if (!isP1Bye && isP2Bye) winnerId = p1Id;
-      if (isP1Bye && !isP2Bye) winnerId = p2Id;
-
-      if (winnerId) {
-        match.winnerId = winnerId;
-        const nextMatch = newMatches.find(m => m.id === match.nextMatchId);
-        if (nextMatch) {
-          const matchIndexInRound = firstRoundMatches.findIndex(m => m.id === match.id);
-          if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
-          else nextMatch.player2Id = winnerId;
+      for (let round = 1; round <= numRounds; round++) {
+        const matchesInRound = bracketSize / (2 ** round);
+        for (let i = 0; i < matchesInRound; i++) {
+          newMatches.push({
+            id: `plm-${matchCounter}`, round, matchIndex: matchCounter,
+            player1Id: null, player2Id: null, score1: null, score2: null,
+            winnerId: null, nextMatchId: null,
+            loserGoesToBronzeFinal: round === numRounds - 1,
+          });
+          matchCounter++;
         }
       }
+
+      newMatches.forEach(match => {
+        if (match.round < numRounds) {
+          const roundMatches = newMatches.filter(m => m.round === match.round);
+          const matchIndexInRound = roundMatches.findIndex(m => m.id === match.id);
+          const nextRoundMatches = newMatches.filter(m => m.round === match.round + 1);
+          const nextMatch = nextRoundMatches[Math.floor(matchIndexInRound / 2)];
+          if (nextMatch) match.nextMatchId = nextMatch.id;
+        }
+      });
+
+      let bronzeFinalId: string | null = null;
+      if (bracketSize > 2 && tournament.settings.hasBronzeFinal) {
+        const bronzeMatch: PlayoffMatch = {
+          id: `plm-bronze`, isBronzeFinal: true, round: numRounds, matchIndex: 999,
+          player1Id: null, player2Id: null, score1: null, score2: null, winnerId: null, nextMatchId: null
+        };
+        newMatches.push(bronzeMatch);
+        bronzeFinalId = bronzeMatch.id;
+      }
+
+      const firstRoundMatches = newMatches.filter(m => m.round === 1 && !m.isBronzeFinal);
+      firstRoundMatches.forEach((match, i) => {
+        const p1Id = firstRoundAssignments[i * 2];
+        const p2Id = firstRoundAssignments[i * 2 + 1];
+        const isP1Bye = p1Id === 'BYE';
+        const isP2Bye = p2Id === 'BYE';
+
+        match.player1Id = isP1Bye ? null : p1Id;
+        match.player2Id = isP2Bye ? null : p2Id;
+
+        let winnerId: string | null = null;
+        if (!isP1Bye && isP2Bye) winnerId = p1Id;
+        if (isP1Bye && !isP2Bye) winnerId = p2Id;
+
+        if (winnerId) {
+          match.winnerId = winnerId;
+          const nextMatch = newMatches.find(m => m.id === match.nextMatchId);
+          if (nextMatch) {
+            const matchIndexInRound = firstRoundMatches.findIndex(m => m.id === match.id);
+            if (matchIndexInRound % 2 === 0) nextMatch.player1Id = winnerId;
+            else nextMatch.player2Id = winnerId;
+          }
+        }
+      });
+
+      const finalBracket: PlayoffBracket = {
+        matches: newMatches, isGenerated: true,
+        finalId: newMatches.find(m => m.round === numRounds && !m.isBronzeFinal)?.id ?? null,
+        bronzeFinalId: bronzeFinalId,
+      };
+
+      // Create "league" matches for tab Partite
+      const playoffMatches: Match[] = [];
+      for (const pm of newMatches) {
+        if (pm.isBronzeFinal) continue;
+        const m = buildLeagueMatchFromPlayoffMatch(pm);
+        if (m) playoffMatches.push(m);
+      }
+
+      const updatedTournaments = event.tournaments.map(t =>
+        t.id === tournament.id
+          ? { ...t, playoffs: finalBracket, playoffMatches }
+          : t
+      );
+
+      await saveEventChanges(event, { tournaments: updatedTournaments });
+
+      setView('bracket');
     });
-
-    const finalBracket: PlayoffBracket = {
-      matches: newMatches, isGenerated: true,
-      finalId: newMatches.find(m => m.round === numRounds && !m.isBronzeFinal)?.id ?? null,
-      bronzeFinalId: bronzeFinalId,
-    };
-
-    // Create "league" matches for tab Partite
-    const playoffMatches: Match[] = [];
-    for (const pm of newMatches) {
-      if (pm.isBronzeFinal) continue;
-      const m = buildLeagueMatchFromPlayoffMatch(pm);
-      if (m) playoffMatches.push(m);
-    }
-
-    const updatedTournaments = event.tournaments.map(t =>
-      t.id === tournament.id
-        ? { ...t, playoffs: finalBracket, playoffMatches }
-        : t
-    );
-
-    setEvents(prev =>
-      prev.map(e =>
-        e.id === event.id ? { ...e, tournaments: updatedTournaments } : e
-      )
-    );
-
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
-
-    setView('bracket');
   };
 
   const handleResetBracket = async () => {
-    const resetBracket: PlayoffBracket = {
-      ...(tournament.playoffs ?? { matches: [], isGenerated: false, finalId: null, bronzeFinalId: null }),
-      isGenerated: false,
-      matches: [],
-      finalId: null,
-      bronzeFinalId: null,
-    };
+    await persistence.run(async () => {
+      const resetBracket: PlayoffBracket = {
+        ...(tournament.playoffs ?? { matches: [], isGenerated: false, finalId: null, bronzeFinalId: null }),
+        isGenerated: false,
+        matches: [],
+        finalId: null,
+        bronzeFinalId: null,
+      };
 
-    const updatedTournaments = event.tournaments.map(t =>
-      t.id === tournament.id
-        ? { ...t, playoffs: resetBracket, playoffMatches: [] }
-        : t
-    );
+      const updatedTournaments = event.tournaments.map(t =>
+        t.id === tournament.id
+          ? { ...t, playoffs: resetBracket, playoffMatches: [] }
+          : t
+      );
 
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, tournaments: updatedTournaments } : e));
-    await updateDoc(doc(db, "events", event.id), { tournaments: updatedTournaments });
+      await saveEventChanges(event, { tournaments: updatedTournaments });
 
-    setView('setup');
-    setIsResetModalOpen(false);
+      setView('setup');
+      setIsResetModalOpen(false);
+    });
   };
 
   if (view === 'setup') {
-    if (!isOrganizer) return <p className="text-text-secondary text-center">Il tabellone dei playoff non è stato ancora generato.</p>;
+    if (!isOrganizer) return <React.Fragment><PersistenceFeedback persistence={persistence} />{<p className="text-text-secondary text-center">Il tabellone dei playoff non è stato ancora generato.</p>}</React.Fragment>;
 
     const unassignedPlayers = qualifiers.filter(q => !firstRoundAssignments.includes(q.playerId));
     const numByesAvailable = bracketSize - qualifiers.length;
@@ -339,7 +333,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
       ? calculateStandings(selectedWithdrawGroup, competitors, tournament.settings)
       : [];
 
-    return (
+    return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
       <div className="bg-secondary p-6 rounded-xl shadow-lg max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <h3 className="text-xl font-bold mb-2 text-accent">Costruttore Tabellone Playoff</h3>
@@ -475,7 +469,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
           </div>
         </div>
       </div>
-    );
+    )}</React.Fragment>;
   }
 
   // ----------------
@@ -541,7 +535,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
   const finalMatch = matches.find(m => m.round === maxRound && !m.isBronzeFinal);
   const winner = finalMatch?.winnerId ? getPlayer(finalMatch.winnerId) : null;
 
-  return (
+  return <React.Fragment><PersistenceFeedback persistence={persistence} />{(
     <div className="bg-secondary p-2 md:p-6 rounded-xl shadow-lg">
       <div className="text-center mb-6">
         <h3 className="text-2xl font-bold text-accent">Tabellone Playoff</h3>
@@ -608,7 +602,7 @@ const Playoffs: React.FC<PlayoffsProps> = ({ event, tournament, setEvents, isOrg
         </div>
       )}
     </div>
-  );
+  )}</React.Fragment>;
 };
 
 export default Playoffs;
