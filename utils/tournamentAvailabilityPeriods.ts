@@ -36,6 +36,15 @@ export function isTournamentWeekendDate(date: string): boolean {
   return day === 5 || day === 6 || day === 0;
 }
 
+/** Evening availability is not allowed on Saturday or Sunday while the clubs are closed. */
+export function isTournamentAvailabilityPeriodAllowedOnDate(
+  period: unknown, date: string,
+): period is TournamentAvailabilityPeriodId {
+  if (!isTournamentAvailabilityPeriod(period) || !isValidTournamentAvailabilityDate(date)) return false;
+  const day = new Date(`${date}T12:00:00`).getDay();
+  return period !== 'EVENING' || (day !== 6 && day !== 0);
+}
+
 export function getTournamentWeekends(now = new Date(), count = 12): TournamentWeekend[] {
   const firstFriday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   firstFriday.setDate(firstFriday.getDate() + ((5 - firstFriday.getDay() + 7) % 7));

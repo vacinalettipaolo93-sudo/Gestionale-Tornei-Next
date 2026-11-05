@@ -6,6 +6,7 @@ import { type TournamentAvailabilityScope } from '../services/availabilityServic
 import { TOURNAMENT_VENUES } from '../utils/tournamentVenues';
 import {
   isTournamentAvailabilityPeriod,
+  isTournamentAvailabilityPeriodAllowedOnDate,
   isTournamentAvailabilityVenue,
   isTournamentWeekendDate,
   type TournamentPeriodAvailability,
@@ -89,7 +90,8 @@ export function useTournamentAvailability(playerIds: string[], scope: Tournament
                   || record.tournamentId !== tournamentId
                   || record.isAvailable !== true || !isTournamentWeekendDate(record.date)
                   || !isTournamentAvailabilityVenue(record.venueId)
-                  || !isTournamentAvailabilityPeriod(record.period)) return;
+                  || !isTournamentAvailabilityPeriod(record.period)
+                  || !isTournamentAvailabilityPeriodAllowedOnDate(record.period, record.date)) return;
                 (periodMap[record.playerId] as TournamentPeriodAvailability[]).push({
                   date: record.date, venueId: record.venueId, period: record.period,
                 });

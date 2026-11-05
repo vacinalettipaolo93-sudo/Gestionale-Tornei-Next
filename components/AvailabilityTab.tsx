@@ -14,6 +14,7 @@ import { TOURNAMENT_VENUES, type TournamentVenueId } from '../utils/tournamentVe
 import {
   formatTournamentAvailabilityDate,
   getTournamentWeekends,
+  isTournamentAvailabilityPeriodAllowedOnDate,
   TOURNAMENT_AVAILABILITY_PERIODS,
   type TournamentAvailabilityPeriodId,
 } from '../utils/tournamentAvailabilityPeriods';
@@ -51,6 +52,8 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const today = getAvailabilityDateKey(new Date(now).toISOString());
   const activeDate = selectedDate >= today ? selectedDate : getInitialDate(weekends);
   const myUnavail = loggedInPlayerId ? dateUnavailMap[loggedInPlayerId]?.has(activeDate) ?? false : false;
+  const visiblePeriods = TOURNAMENT_AVAILABILITY_PERIODS
+    .filter(period => isTournamentAvailabilityPeriodAllowedOnDate(period.id, activeDate));
 
   const hasPeriod = (playerId: string, venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId) =>
     periodMap?.[playerId]?.some(entry => entry.date === activeDate
@@ -71,7 +74,8 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   }
 
   async function togglePeriod(venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId) {
-    if (!loggedInPlayerId || savingPreference || myUnavail) return;
+    if (!loggedInPlayerId || savingPreference || myUnavail
+      || !isTournamentAvailabilityPeriodAllowedOnDate(period, activeDate)) return;
     const currentlySelected = hasPeriod(loggedInPlayerId, venueId, period);
     setSavingPreference(true);
     setSaveError(null);
@@ -116,6 +120,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
       <p className="text-sm text-text-secondary">
         Seleziona un venerdì, sabato o domenica nei prossimi 12 weekend. Per ogni circolo indica mattina,
         pomeriggio o sera: i periodi sono fasce indicative per concordare una partita, non una prenotazione del campo.
+        Il sabato e la domenica non è possibile indicare disponibilità serale perché i circoli chiudono alle 18:00.
         Puoi segnare ogni giornata come non disponibile.
       </p>
       {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
@@ -197,7 +202,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
               <section key={venue.id} className="bg-primary p-4 rounded-lg border border-tertiary space-y-3">
                 <h5 className="font-bold text-accent">{venue.name}</h5>
                 <div className="space-y-2">
-                  {TOURNAMENT_AVAILABILITY_PERIODS.map(period => {
+                  {visiblePeriods.map(period => {
                     const selected = loggedInPlayerId ? hasPeriod(loggedInPlayerId, venue.id, period.id) : false;
                     return (
                       <button key={period.id} type="button" aria-pressed={selected}
@@ -236,7 +241,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
                   <tr key={player.id} className="border-b border-tertiary last:border-0">
                     <td className="p-3 font-medium">{player.name}</td>
                     {TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).map(venue => {
-                      const periods = TOURNAMENT_AVAILABILITY_PERIODS
+                      const periods = visiblePeriods
                         .filter(period => hasPeriod(player.id, venue.id, period.id))
                         .map(period => period.label);
                       return (
