@@ -242,7 +242,8 @@ export async function setSlotPreference(playerId: string, slotId: string, isPref
 }
 
 export async function removeSlotPreference(playerId: string, slotId: string): Promise<void> {
-  const id = doc(db, SLOT_PREF_COL, slotId);
+  const id = docIdSlotPref(playerId, slotId);
+  const ref = doc(db, SLOT_PREF_COL, id);
   await deleteDoc(ref);
 }
 
