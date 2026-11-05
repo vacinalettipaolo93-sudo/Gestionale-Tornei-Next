@@ -15,8 +15,9 @@ import { db } from "../firebase";
 import { TOURNAMENT_VENUES, type TournamentVenueId } from "../utils/tournamentVenues";
 import {
   getTournamentPeriodAvailabilityId,
-  isTournamentWeekendDate,
   isTournamentAvailabilityPeriod,
+  isTournamentAvailabilityPeriodAllowedOnDate,
+  isTournamentWeekendDate,
   type TournamentAvailabilityPeriodId,
 } from "../utils/tournamentAvailabilityPeriods";
 
@@ -115,8 +116,9 @@ export async function setTournamentPeriodAvailability(
     || !isTournamentWeekendDate(date)
     || date < todayKey
     || !TOURNAMENT_VENUES.some(venue => venue.id === venueId)
-    || !isTournamentAvailabilityPeriod(period)) {
-    throw new Error('Seleziona un giorno, un centro e una fascia oraria validi.');
+    || !isTournamentAvailabilityPeriod(period)
+    || !isTournamentAvailabilityPeriodAllowedOnDate(period, date)) {
+    throw new Error('Seleziona un giorno, un centro e una fascia oraria validi. La sera non è disponibile il sabato e la domenica.');
   }
   const ref = doc(db, TOURNAMENT_AVAIL_COL,
     getTournamentPeriodAvailabilityId(scope, playerId, date, venueId, period));
