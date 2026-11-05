@@ -15,9 +15,9 @@ import { db } from "../firebase";
 import { TOURNAMENT_VENUES, type TournamentVenueId } from "../utils/tournamentVenues";
 import {
   getTournamentPeriodAvailabilityId,
+  isTournamentWeekendDate,
   isTournamentAvailabilityPeriod,
   isTournamentAvailabilityPeriodAllowedOnDate,
-  isTournamentWeekendDate,
   type TournamentAvailabilityPeriodId,
 } from "../utils/tournamentAvailabilityPeriods";
 
@@ -242,8 +242,7 @@ export async function setSlotPreference(playerId: string, slotId: string, isPref
 }
 
 export async function removeSlotPreference(playerId: string, slotId: string): Promise<void> {
-  const id = docIdSlotPref(playerId, slotId);
-  const ref = doc(db, SLOT_PREF_COL, id);
+  const id = doc(db, SLOT_PREF_COL, slotId);
   await deleteDoc(ref);
 }
 
