@@ -100,7 +100,7 @@ export async function setTournamentVenues(playerId: string, venueIds: Tournament
 }
 
 // --- collections ---
-const AVAIL_COL = "availabilities"; // legacy
+const AVAIL_COL = "availabilities"; // legacy and tournament availability
 const GLOBAL_COL = "availability_settings";
 const SLOT_PREF_COL = "slot_preferences";
 const DATE_UNAVAIL_COL = "date_unavailabilities";
@@ -114,7 +114,7 @@ export async function setTournamentPeriodAvailability(
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   if (!playerId || !scope.eventId || !scope.tournamentId
     || !isTournamentWeekendDate(date)
-    || date < todayKey
+    || (isAvailable && date < todayKey)
     || !TOURNAMENT_VENUES.some(venue => venue.id === venueId)
     || !isTournamentAvailabilityPeriod(period)
     || !isTournamentAvailabilityPeriodAllowedOnDate(period, date)) {
@@ -217,7 +217,6 @@ export async function getDateUnavailabilitiesForPlayers(playerIds: string[], sta
   for (let i = 0; i < playerIds.length; i += CHUNK) {
     const chunk = playerIds.slice(i, i + CHUNK);
     const c = collection(db, DATE_UNAVAIL_COL);
-    // Build query: playerId in chunk, optional date range
     let q;
     if (startDate && endDate) {
       q = query(c, where("playerId", "in", chunk), where("date", ">=", startDate), where("date", "<=", endDate), orderBy("date", "asc"));
