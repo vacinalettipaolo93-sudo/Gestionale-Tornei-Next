@@ -45,18 +45,35 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   const savedVenues = loggedInPlayerId ? venueMap[loggedInPlayerId] : undefined;
   const selectedVenues = savedVenues ?? new Set<TournamentVenueId>(ALL_VENUES);
   const weekends = useMemo(() => getTournamentWeekends(new Date(now), 12), [now]);
-  const [selectedDate, setSelectedDate] = useState(() => getInitialDate(getTournamentWeekends()));
+  const allWeekendDates = useMemo(() => weekends.flatMap(weekend => [weekend.friday, weekend.saturday, weekend.sunday]), [weekends]);
+  const initialDate = getInitialDate(weekends);
+  const [selectedDates, setSelectedDates] = useState<string[]>([initialDate]);
   const [savingVenues, setSavingVenues] = useState(false);
   const [savingPreference, setSavingPreference] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const today = getAvailabilityDateKey(new Date(now).toISOString());
-  const activeDate = selectedDate >= today ? selectedDate : getInitialDate(weekends);
-  const myUnavail = loggedInPlayerId ? dateUnavailMap[loggedInPlayerId]?.has(activeDate) ?? false : false;
-  const visiblePeriods = TOURNAMENT_AVAILABILITY_PERIODS
-    .filter(period => isTournamentAvailabilityPeriodAllowedOnDate(period.id, activeDate));
+  const validSelectedDates = selectedDates.filter(date => date >= today);
+  const effectiveSelectedDates = validSelectedDates.length ? validSelectedDates : [initialDate];
+  const activeDate = effectiveSelectedDates[0];
 
-  const hasPeriod = (playerId: string, venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId) =>
-    periodMap?.[playerId]?.some(entry => entry.date === activeDate
+  const toggleDateSelection = (date: string) => {
+    setSelectedDates(previous => {
+      if (previous.includes(date)) {
+        const next = previous.filter(item => item !== date);
+        return next.length > 0 ? next : [date];
+      }
+      return [...previous, date];
+    });
+  };
+
+  const selectWeekdayDates = (weekday: 5 | 6 | 0) => {
+    const weekendDay = weekday === 5 ? 'friday' : weekday === 6 ? 'saturday' : 'sunday';
+    const dates = weekends.map(weekend => weekend[weekendDay]).filter(date => date >= today);
+    setSelectedDates(dates.length ? dates : [initialDate]);
+  };
+
+  const hasPeriod = (playerId: string, venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId, date: string) =>
+    periodMap?.[playerId]?.some(entry => entry.date === date
       && entry.venueId === venueId && entry.period === period) ?? false;
 
   async function saveVenues(venueIds: TournamentVenueId[]) {
@@ -74,13 +91,16 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   }
 
   async function togglePeriod(venueId: TournamentVenueId, period: TournamentAvailabilityPeriodId) {
-    if (!loggedInPlayerId || savingPreference || myUnavail
-      || !isTournamentAvailabilityPeriodAllowedOnDate(period, activeDate)) return;
-    const currentlySelected = hasPeriod(loggedInPlayerId, venueId, period);
+    if (!loggedInPlayerId || savingPreference) return;
+    const targetDates = effectiveSelectedDates.filter(date => isTournamentAvailabilityPeriodAllowedOnDate(period, date));
+    if (targetDates.length === 0) return;
+    const shouldSelect = !targetDates.every(date => hasPeriod(loggedInPlayerId, venueId, period, date));
     setSavingPreference(true);
     setSaveError(null);
     try {
-      await setTournamentPeriodAvailability(loggedInPlayerId, activeDate, venueId, period, !currentlySelected, scope);
+      for (const date of targetDates) {
+        await setTournamentPeriodAvailability(loggedInPlayerId, date, venueId, period, shouldSelect, scope);
+      }
     } catch (cause) {
       console.error('Errore salvataggio fascia oraria:', cause);
       setSaveError(cause instanceof Error ? cause.message : 'Impossibile salvare la fascia oraria. Riprova.');
@@ -91,11 +111,14 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
 
   async function toggleDateUnavailability() {
     if (!loggedInPlayerId || savingPreference) return;
+    const shouldMarkUnavailable = !effectiveSelectedDates.every(date => dateUnavailMap[loggedInPlayerId]?.has(date) ?? false);
     setSavingPreference(true);
     setSaveError(null);
     try {
-      if (myUnavail) await removeDateUnavailability(loggedInPlayerId, activeDate, scope);
-      else await setDateUnavailability(loggedInPlayerId, activeDate, true, scope);
+      for (const date of effectiveSelectedDates) {
+        if (shouldMarkUnavailable) await setDateUnavailability(loggedInPlayerId, date, true, scope);
+        else await removeDateUnavailability(loggedInPlayerId, date, scope);
+      }
     } catch (cause) {
       console.error('Errore salvataggio non disponibilità:', cause);
       setSaveError(cause instanceof Error ? cause.message : 'Impossibile salvare la non disponibilità. Riprova.');
@@ -108,6 +131,9 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
   if (error) return <p role="alert" className="text-red-400">{error}</p>;
 
   const formattedDate = formatTournamentAvailabilityDate(activeDate);
+  const myUnavail = loggedInPlayerId
+    ? effectiveSelectedDates.every(date => dateUnavailMap[loggedInPlayerId]?.has(date) ?? false)
+    : false;
   const venueOptions = [
     { name: TOURNAMENT_VENUES[0].name, ids: [TOURNAMENT_VENUES[0].id] },
     { name: TOURNAMENT_VENUES[1].name, ids: [TOURNAMENT_VENUES[1].id] },
@@ -118,10 +144,9 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     <div className="max-w-6xl mx-auto bg-secondary rounded-xl p-4 sm:p-6 shadow space-y-6">
       <h3 className="text-xl font-bold text-accent">Disponibilità di gioco</h3>
       <p className="text-sm text-text-secondary">
-        Seleziona un venerdì, sabato o domenica nei prossimi 12 weekend. Per ogni circolo indica mattina,
-        pomeriggio o sera: i periodi sono fasce indicative per concordare una partita, non una prenotazione del campo.
-        Il sabato e la domenica non è possibile indicare disponibilità serale perché i circoli chiudono alle 18:00.
-        Puoi segnare ogni giornata come non disponibile.
+        Seleziona uno o più giorni, anche di weekend diversi, e applica la stessa fascia a tutte le date selezionate.
+        Puoi ad esempio selezionare tutti i venerdì e indicare la sera. Il sabato e la domenica non è possibile
+        indicare disponibilità serale perché i circoli chiudono alle 18:00.
       </p>
       {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
       {(savingPreference || availability.pendingWrites) && <p role="status">Salvataggio disponibilità su Firebase...</p>}
@@ -152,7 +177,14 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
       </fieldset>
 
       <fieldset className="space-y-3">
-        <legend className="font-bold">2. Scegli un giorno del weekend</legend>
+        <legend className="font-bold">2. Seleziona le date</legend>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <button type="button" onClick={() => selectWeekdayDates(5)} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i venerdì</button>
+          <button type="button" onClick={() => selectWeekdayDates(6)} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i sabati</button>
+          <button type="button" onClick={() => selectWeekdayDates(0)} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutte le domeniche</button>
+          <button type="button" onClick={() => setSelectedDates(allWeekendDates.filter(date => date >= today))} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i giorni</button>
+        </div>
+        <p className="text-xs text-text-secondary">Selezione attuale: {effectiveSelectedDates.length} date. Clicca le date per aggiungerle o rimuoverle.</p>
         <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
           {weekends.map((weekend, index) => {
             const days = [weekend.friday, weekend.saturday, weekend.sunday].filter(date => date >= today);
@@ -161,18 +193,24 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
               <div key={weekend.friday} className="rounded-lg border border-tertiary bg-primary p-3">
                 <h4 className="text-sm text-text-secondary mb-2">Weekend {index + 1}</h4>
                 <div className="grid grid-cols-3 gap-2">
-                  {days.map(date => (
-                    <button
-                      key={date}
-                      type="button"
-                      aria-pressed={activeDate === date}
-                      onClick={() => setSelectedDate(date)}
-                      className={`min-w-0 p-2 rounded-lg border text-center capitalize ${activeDate === date ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary hover:bg-tertiary'}`}
-                    >
-                      <span className="block text-xs">{formatTournamentAvailabilityDate(date, { weekday: 'short' })}</span>
-                      <span className="block font-bold">{formatTournamentAvailabilityDate(date, { day: 'numeric', month: 'short' })}</span>
-                    </button>
-                  ))}
+                  {days.map(date => {
+                    const isSelected = effectiveSelectedDates.includes(date);
+                    const weekday = new Date(`${date}T12:00:00`).getDay();
+                    const label = weekday === 5 ? 'Venerdì' : weekday === 6 ? 'Sabato' : 'Domenica';
+                    return (
+                      <button
+                        key={date}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => toggleDateSelection(date)}
+                        className={`min-w-0 p-2 rounded-lg border text-center capitalize ${isSelected ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary hover:bg-tertiary'}`}
+                      >
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide">{label}</span>
+                        <span className="block text-xs mt-1">{formatTournamentAvailabilityDate(date, { weekday: 'short' })}</span>
+                        <span className="block font-bold">{formatTournamentAvailabilityDate(date, { day: 'numeric', month: 'short' })}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -182,19 +220,22 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
 
       <section className="space-y-4" aria-label={`Disponibilità per ${formattedDate}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h4 className="font-bold text-lg capitalize">{formattedDate}</h4>
+          <div>
+            <h4 className="font-bold text-lg capitalize">Date selezionate ({effectiveSelectedDates.length})</h4>
+            <p className="text-xs text-text-secondary mt-1">La fascia scelta verrà applicata a tutte le date selezionate in cui è consentita.</p>
+          </div>
           {loggedInPlayerId ? (
             <button type="button" onClick={() => void toggleDateUnavailability()}
               disabled={savingPreference || savingVenues}
               className={`px-4 py-2 rounded-lg font-semibold disabled:opacity-50 ${myUnavail ? 'bg-red-700 text-white' : 'bg-tertiary text-text-primary'}`}>
-              {myUnavail ? 'Rimuovi: non disponibile' : 'Segna tutta la giornata non disponibile'}
+              {myUnavail ? 'Rimuovi: non disponibile' : 'Segna le date selezionate non disponibili'}
             </button>
           ) : <span className="text-sm text-text-secondary">Accedi per modificare le disponibilità</span>}
         </div>
 
         {myUnavail ? (
           <p role="status" className="rounded-lg bg-red-950/40 border border-red-800 p-4 text-red-300">
-            Hai segnato questa giornata come non disponibile. Le fasce già salvate sono conservate, ma non compariranno nei suggerimenti.
+            Tutte le date selezionate sono segnate come non disponibili. Le fasce già salvate sono conservate, ma non compariranno nei suggerimenti.
           </p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -202,15 +243,20 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
               <section key={venue.id} className="bg-primary p-4 rounded-lg border border-tertiary space-y-3">
                 <h5 className="font-bold text-accent">{venue.name}</h5>
                 <div className="space-y-2">
-                  {visiblePeriods.map(period => {
-                    const selected = loggedInPlayerId ? hasPeriod(loggedInPlayerId, venue.id, period.id) : false;
+                  {TOURNAMENT_AVAILABILITY_PERIODS.map(period => {
+                    const allowedDates = effectiveSelectedDates.filter(date => isTournamentAvailabilityPeriodAllowedOnDate(period.id, date));
+                    const selected = !!loggedInPlayerId && allowedDates.length > 0
+                      && allowedDates.every(date => hasPeriod(loggedInPlayerId, venue.id, period.id, date));
                     return (
                       <button key={period.id} type="button" aria-pressed={selected}
                         onClick={() => void togglePeriod(venue.id, period.id)}
-                        disabled={!loggedInPlayerId || savingPreference || savingVenues || myUnavail}
-                        className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border text-left disabled:opacity-50 ${selected ? 'border-green-500 bg-green-950/40' : 'border-tertiary hover:bg-tertiary'}`}>
+                        disabled={!loggedInPlayerId || savingPreference || savingVenues || myUnavail || allowedDates.length === 0}
+                        className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border text-left disabled:opacity-50 ${selected ? 'border-green-500 bg-green-950/40' : 'border-tertiary bg-secondary/60'}`}
+                      >
                         <span><span className="font-semibold">{period.label}</span><span className="block text-xs text-text-secondary">{period.hours}</span></span>
-                        <span className={selected ? 'text-green-400 font-semibold' : 'text-text-secondary'}>{selected ? 'Disponibile' : 'Non selezionata'}</span>
+                        <span className={selected ? 'text-green-400 font-semibold' : 'text-text-secondary'}>
+                          {allowedDates.length === 0 ? 'Non disponibile in queste date' : selected ? 'Disponibile in tutte le date consentite' : `Seleziona (${allowedDates.length} date)`}
+                        </span>
                       </button>
                     );
                   })}
@@ -222,7 +268,7 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
       </section>
 
       <section className="space-y-3">
-        <h4 className="font-bold">Disponibilità dichiarate · {selectedGroup.name} · <span className="capitalize">{formattedDate}</span></h4>
+        <h4 className="font-bold">Disponibilità dichiarate · {selectedGroup.name} · date selezionate</h4>
         <div className="overflow-x-auto rounded-lg border border-tertiary">
           <table className="min-w-full text-sm bg-primary">
             <thead>
@@ -236,19 +282,20 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
             </thead>
             <tbody>
               {participants.map(player => {
-                const unavailable = dateUnavailMap[player.id]?.has(activeDate) ?? false;
+                const unavailable = effectiveSelectedDates.some(date => dateUnavailMap[player.id]?.has(date) ?? false);
                 return (
                   <tr key={player.id} className="border-b border-tertiary last:border-0">
                     <td className="p-3 font-medium">{player.name}</td>
                     {TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).map(venue => {
-                      const periods = visiblePeriods
-                        .filter(period => hasPeriod(player.id, venue.id, period.id))
-                        .map(period => period.label);
+                      const periods = effectiveSelectedDates.flatMap(date =>
+                        TOURNAMENT_AVAILABILITY_PERIODS
+                          .filter(period => isTournamentAvailabilityPeriodAllowedOnDate(period.id, date)
+                            && hasPeriod(player.id, venue.id, period.id, date))
+                          .map(period => `${formatTournamentAvailabilityDate(date, { weekday: 'short', day: 'numeric' })}: ${period.label}`),
+                      );
                       return (
                         <td key={venue.id} className="p-3">
-                          {unavailable ? <span className="text-red-400">Non disponibile</span> : (
-                            periods.length ? periods.join(', ') : '—'
-                          )}
+                          {unavailable ? <span className="text-red-400">Non disponibile</span> : periods.length ? periods.join(' • ') : '—'}
                         </td>
                       );
                     })}
@@ -265,7 +312,6 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
           </table>
         </div>
       </section>
-
     </div>
   );
 }
