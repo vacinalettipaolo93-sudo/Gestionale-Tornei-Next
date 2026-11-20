@@ -900,13 +900,13 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen min-w-0 bg-primary text-text-primary p-3 sm:p-6 lg:p-8">
+    <div className="app-shell min-h-screen min-w-0 bg-primary text-text-primary px-3 pb-4 sm:px-6 sm:pb-6 lg:px-8 lg:pb-8">
       {syncNotice}
       {events.filter(event => isOrganizer || event.players.some(player => player.id === loggedInPlayerId)).map(event => (
         <ExpiredSlotCleanup key={event.id} event={event} isOrganizer={isOrganizer} playerId={loggedInPlayerId} />
       ))}
-      <header className="mb-8">
-        <div className="max-w-7xl mx-auto flex justify-between items-center gap-2 sm:gap-4">
+      <header className="app-header -mx-3 mb-6 px-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <div className="app-header-inner max-w-7xl mx-auto flex justify-between items-center gap-2 sm:gap-4">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <NextTsBrandIcon className="w-14 sm:w-36 lg:w-44 h-auto flex-shrink-0" />
             <div className="min-w-0">

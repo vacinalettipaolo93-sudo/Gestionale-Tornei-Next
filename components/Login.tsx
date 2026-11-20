@@ -37,7 +37,7 @@ const Login: React.FC<LoginProps> = ({ users, players, onLoginSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-primary text-text-primary flex flex-col items-center justify-center p-4 animate-fadeIn">
+    <div className="app-login-shell min-h-screen bg-primary text-text-primary flex flex-col items-center justify-center p-4 animate-fadeIn">
       <div className="w-full max-w-4xl flex flex-col items-center">
         <div className="flex flex-col items-center mb-8 text-center w-full">
           <NextTsLogo className="w-52 sm:w-64 md:w-72 h-auto mb-3" />
