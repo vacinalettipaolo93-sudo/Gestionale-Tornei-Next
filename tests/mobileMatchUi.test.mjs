@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const temporary = mkdtempSync(path.join(os.tmpdir(), 'mobile-match-ui-'));
 after(() => rmSync(temporary, { recursive: true }));
 await build({
-  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx'], bundle: true, platform: 'node',
+  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx', 'components/MatchFinder.tsx'], bundle: true, platform: 'node',
   format: 'esm', outdir: temporary, outExtension: { '.js': '.mjs' },
   plugins: [{
     name: 'render-dependencies',
@@ -36,11 +36,13 @@ await build({
     },
   }],
 });
-const load = async name => (await import(pathToFileURL(path.join(temporary, `${name}.mjs`)).href)).default;
+const loadModule = async name => import(pathToFileURL(path.join(temporary, `${name}.mjs`)).href);
+const load = async name => (await loadModule(name)).default;
 const MatchList = await load('MatchList');
 const PadelIndividualRankingView = await load('PadelIndividualRankingView');
 const GroupManagement = await load('GroupManagement');
 const TournamentTabBar = await load('TournamentTabBar');
+const { RankingMatchFinder } = await loadModule('MatchFinder');
 const players = ['a', 'b', 'c', 'd'].map(id => ({ id, name: `Player ${id}`, status: 'confirmed', avatar: 'avatar.png', phone: '' }));
 const match = (id, p1 = 'a', p2 = 'b', overrides = {}) => ({
   id, player1Id: p1, player2Id: p2, score1: null, score2: null, status: 'pending', ...overrides,
@@ -110,6 +112,29 @@ test('tournament tabs stay in one swipeable row with a clearly selected section'
   for (const tab of tabs) assert.ok(nav.includes(tab.label));
   assert.match(nav, /aria-current="page"[^>]*>Disponibilità di gioco<\/button>/);
   assert.equal((nav.match(/whitespace-nowrap/g) ?? []).length, tabs.length);
+});
+
+test('match finder lists players by number of shared periods without exposing their availability details', () => {
+  const html = renderToStaticMarkup(React.createElement(RankingMatchFinder, {
+    currentPlayerId: 'a',
+    opponents: [players[1], players[2]],
+    availabilities: {
+      a: { dayPeriods: { monday: ['morning', 'afternoon', 'evening'] } },
+      b: { dayPeriods: { monday: ['morning'] } },
+      c: { dayPeriods: { monday: ['morning', 'afternoon'] } },
+    },
+    onAvailability() {},
+    onPlayerContact() {},
+    onChallenge() {},
+  }));
+  const higherMatch = html.indexOf('Player c');
+  const lowerMatch = html.indexOf('Player b');
+
+  assert.ok(higherMatch >= 0 && higherMatch < lowerMatch);
+  assert.match(html, /2 fasce in comune/);
+  assert.match(html, /1 fascia in comune/);
+  assert.match(html, /Sfida/);
+  assert.doesNotMatch(html, /Lunedì|Mattina|Pomeriggio|Sera/);
 });
 
 test('own result controls remain accessible outside the original group and completed filter excludes other players', () => {
