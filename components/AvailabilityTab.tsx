@@ -252,46 +252,6 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
         </fieldset>
       </details>
 
-      {loggedInPlayerId && (
-        <details open className="availability-disclosure">
-          <summary>
-            <span>
-              <span className="block text-accent">Le mie disponibilità salvate</span>
-              <span className="mt-1 block text-xs font-normal text-text-secondary">Le date restano salvate anche quando selezioni altri giorni. Puoi modificarle o eliminarle singolarmente.</span>
-            </span>
-          </summary>
-          <div className="availability-disclosure-content space-y-3">
-            {personalDates.length === 0 ? <p className="text-sm text-text-secondary">Non hai ancora disponibilità salvate.</p> : (
-              <ul className="space-y-2">
-                {personalDates.map(date => {
-                  const datePeriods = ownPeriods.filter(entry => entry.date === date);
-                  return (
-                    <li key={date} className="flex flex-col gap-3 rounded-lg border border-tertiary bg-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="font-semibold capitalize">{formatTournamentAvailabilityDate(date)}</div>
-                        {ownUnavailableDates.has(date) ? <div className="text-sm text-red-300">Non disponibile</div> : (
-                          datePeriods.length ? datePeriods.map(entry => {
-                            const venue = TOURNAMENT_VENUES.find(item => item.id === entry.venueId);
-                            const period = TOURNAMENT_AVAILABILITY_PERIODS.find(item => item.id === entry.period);
-                            return <div key={`${entry.venueId}-${entry.period}`} className="text-sm text-text-secondary">{venue?.name}: {period?.label}</div>;
-                          }) : <div className="text-sm text-text-secondary">Nessuna fascia indicata</div>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <button type="button" onClick={() => savePersonalEditDate(date)} disabled={savingPreference}
-                          className="rounded-lg bg-tertiary px-3 py-2 text-sm font-semibold">Modifica</button>
-                        <button type="button" onClick={() => void deletePersonalDate(date)} disabled={savingPreference}
-                          className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200">Elimina</button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </details>
-      )}
-
       <details open className="availability-disclosure" aria-label="Imposta fasce per le date selezionate">
         <summary>
           <span>
@@ -338,6 +298,46 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
         )}
         </div>
       </details>
+
+      {loggedInPlayerId && (
+        <details open className="availability-disclosure">
+          <summary>
+            <span>
+              <span className="block text-accent">Le mie disponibilità salvate</span>
+              <span className="mt-1 block text-xs font-normal text-text-secondary">Le date restano salvate anche quando selezioni altri giorni. Puoi modificarle o eliminarle singolarmente.</span>
+            </span>
+          </summary>
+          <div className="availability-disclosure-content space-y-3">
+            {personalDates.length === 0 ? <p className="text-sm text-text-secondary">Non hai ancora disponibilità salvate.</p> : (
+              <ul className="space-y-2">
+                {personalDates.map(date => {
+                  const datePeriods = ownPeriods.filter(entry => entry.date === date);
+                  return (
+                    <li key={date} className="flex flex-col gap-3 rounded-lg border border-tertiary bg-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="font-semibold capitalize">{formatTournamentAvailabilityDate(date)}</div>
+                        {ownUnavailableDates.has(date) ? <div className="text-sm text-red-300">Non disponibile</div> : (
+                          datePeriods.length ? datePeriods.map(entry => {
+                            const venue = TOURNAMENT_VENUES.find(item => item.id === entry.venueId);
+                            const period = TOURNAMENT_AVAILABILITY_PERIODS.find(item => item.id === entry.period);
+                            return <div key={`${entry.venueId}-${entry.period}`} className="text-sm text-text-secondary">{venue?.name}: {period?.label}</div>;
+                          }) : <div className="text-sm text-text-secondary">Nessuna fascia indicata</div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button type="button" onClick={() => savePersonalEditDate(date)} disabled={savingPreference}
+                          className="rounded-lg bg-tertiary px-3 py-2 text-sm font-semibold">Modifica</button>
+                        <button type="button" onClick={() => void deletePersonalDate(date)} disabled={savingPreference}
+                          className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200">Elimina</button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </details>
+      )}
 
       <details open className="availability-disclosure">
         <summary>
