@@ -161,14 +161,14 @@ const MatchCard: React.FC<{
     : '';
 
   return (
-    <div className="bg-secondary p-4 rounded-lg shadow">
+    <div className="bg-secondary p-4 sm:p-5 rounded-xl shadow">
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:gap-4">
-        <div className="min-w-0 flex flex-col sm:flex-row items-center gap-2 justify-start">
+        <div className="min-w-0 flex flex-col sm:flex-row items-center gap-2">
           <img src={player1.avatar} alt="" className="w-10 h-10 shrink-0 rounded-full object-cover" />
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onPlayerContact(player1); }}
-            className="min-w-0 text-center sm:text-left text-sm sm:text-base font-semibold hover:underline text-text-primary cursor-pointer"
+            className="min-w-0 max-w-full break-words text-center sm:text-left text-sm sm:text-base font-semibold hover:underline text-text-primary cursor-pointer"
           >
             {player1.name}
           </button>
@@ -183,24 +183,29 @@ const MatchCard: React.FC<{
             <div className="text-lg font-medium text-center text-text-secondary">vs</div>
           )}
         </div>
-        {scheduledInfo && (
-          <div className="text-sm text-text-secondary mt-3 text-center rounded-lg border border-tertiary p-2">
-            <span>{scheduledInfo.date} — {scheduledInfo.time}</span>
-            {scheduledInfo.field && <div className="font-semibold text-text-primary">{scheduledInfo.field}</div>}
-          </div>
-        )}
-
-        <div className="min-w-0 flex flex-col-reverse sm:flex-row items-center gap-2 justify-end">
+        <div className="min-w-0 flex flex-col-reverse sm:flex-row-reverse items-center gap-2">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onPlayerContact(player2); }}
-            className="min-w-0 text-center sm:text-right text-sm sm:text-base font-semibold hover:underline text-text-primary cursor-pointer"
+            className="min-w-0 max-w-full break-words text-center sm:text-right text-sm sm:text-base font-semibold hover:underline text-text-primary cursor-pointer"
           >
             {player2.name}
           </button>
           <img src={player2.avatar} alt="" className="w-10 h-10 shrink-0 rounded-full object-cover" />
         </div>
       </div>
+
+      {scheduledInfo && (
+        <div className="mt-4 rounded-lg border border-tertiary bg-primary/30 px-4 py-3 text-center">
+          <div className="text-sm text-text-secondary">{scheduledInfo.date} · {scheduledInfo.time}</div>
+          {scheduledInfo.field && (
+            <div className="mt-1">
+              <div className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Campo di gioco</div>
+              <div className="font-semibold text-text-primary">{scheduledInfo.field}</div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-center gap-2 pt-4 mt-4 border-t border-tertiary/50">
         {match.status === 'pending' && canBook && (
