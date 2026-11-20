@@ -183,119 +183,132 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
       {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
       {(savingPreference || availability.pendingWrites) && <p role="status">Salvataggio disponibilità su Firebase...</p>}
 
-      <fieldset className="space-y-3">
-        <legend className="font-bold">1. Per quali circoli vuoi indicare la disponibilità?</legend>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {venueOptions.map(choice => {
-            const selected = choice.ids.length === selectedVenues.size && choice.ids.every(id => selectedVenues.has(id));
-            return (
-              <button key={choice.name} type="button" aria-pressed={selected}
-                disabled={!loggedInPlayerId || savingVenues || savingPreference}
-                onClick={() => void saveVenues(choice.ids)}
-                className={`p-3 rounded-lg border-2 font-semibold disabled:opacity-50 ${selected ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary bg-primary'}`}>
-                {choice.name}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-xs text-text-secondary">Le preferenze si salvano per questo torneo. Cambiare circolo non cancella le fasce già indicate per l’altro.</p>
-      </fieldset>
+      <details open className="availability-disclosure">
+        <summary>1. Per quali circoli vuoi indicare la disponibilità?</summary>
+        <fieldset className="availability-disclosure-content space-y-3">
+          <legend className="sr-only">1. Per quali circoli vuoi indicare la disponibilità?</legend>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {venueOptions.map(choice => {
+              const selected = choice.ids.length === selectedVenues.size && choice.ids.every(id => selectedVenues.has(id));
+              return (
+                <button key={choice.name} type="button" aria-pressed={selected}
+                  disabled={!loggedInPlayerId || savingVenues || savingPreference}
+                  onClick={() => void saveVenues(choice.ids)}
+                  className={`p-3 rounded-lg border-2 font-semibold disabled:opacity-50 ${selected ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary bg-primary'}`}>
+                  {choice.name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-text-secondary">Le preferenze si salvano per questo torneo. Cambiare circolo non cancella le fasce già indicate per l’altro.</p>
+        </fieldset>
+      </details>
 
-      <fieldset className="space-y-3">
-        <legend className="font-bold">2. Seleziona le date da impostare</legend>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => selectWeekdayDates('friday')} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i venerdì</button>
-          <button type="button" onClick={() => selectWeekdayDates('saturday')} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i sabati</button>
-          <button type="button" onClick={() => selectWeekdayDates('sunday')} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutte le domeniche</button>
-          <button type="button" onClick={() => setSelectedDates(allWeekendDates.filter(date => date >= today))} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i giorni</button>
-          <button type="button" onClick={() => setSelectedDates([])} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Deseleziona tutto</button>
-        </div>
-        <div className="rounded-lg border border-tertiary bg-primary/60 p-3">
-          <p className="text-sm font-semibold">Date selezionate: {effectiveSelectedDates.length}</p>
-          {effectiveSelectedDates.length ? (
-            <ul className="mt-2 flex flex-wrap gap-2" aria-label="Elenco delle date selezionate">
-              {effectiveSelectedDates.map(date => <li key={date} className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs capitalize">{formatTournamentAvailabilityDate(date, { weekday: 'short', day: 'numeric', month: 'short' })}</li>)}
-            </ul>
-          ) : <p className="mt-1 text-xs text-text-secondary">Seleziona almeno una data.</p>}
-        </div>
-        <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
-          {weekends.map((weekend, index) => {
-            const days = [weekend.friday, weekend.saturday, weekend.sunday].filter(date => date >= today);
-            if (!days.length) return null;
-            return (
-              <div key={weekend.friday} className="rounded-lg border border-tertiary bg-primary p-3">
-                <h4 className="text-sm text-text-secondary mb-2">Weekend {index + 1}</h4>
-                <div className="grid grid-cols-3 gap-2">
-                  {days.map(date => {
-                    const isSelected = effectiveSelectedDates.includes(date);
-                    const weekday = new Date(`${date}T12:00:00`).getDay();
-                    const dayLabel = weekday === 5 ? 'Venerdì' : weekday === 6 ? 'Sabato' : 'Domenica';
-                    return (
-                      <button key={date} type="button" aria-pressed={isSelected} onClick={() => toggleDateSelection(date)}
-                        className={`min-w-0 p-2 rounded-lg border text-center capitalize ${isSelected ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary hover:bg-tertiary'}`}>
-                        <span className="block text-[10px] font-semibold uppercase tracking-wide">{dayLabel}</span>
-                        <span className="block text-xs mt-1">{formatTournamentAvailabilityDate(date, { weekday: 'short' })}</span>
-                        <span className="block font-bold">{formatTournamentAvailabilityDate(date, { day: 'numeric', month: 'short' })}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </fieldset>
+      <details open className="availability-disclosure">
+        <summary>2. Seleziona le date da impostare</summary>
+        <fieldset className="availability-disclosure-content space-y-3">
+          <legend className="sr-only">2. Seleziona le date da impostare</legend>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => selectWeekdayDates('friday')} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i venerdì</button>
+            <button type="button" onClick={() => selectWeekdayDates('saturday')} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i sabati</button>
+            <button type="button" onClick={() => selectWeekdayDates('sunday')} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutte le domeniche</button>
+            <button type="button" onClick={() => setSelectedDates(allWeekendDates.filter(date => date >= today))} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Tutti i giorni</button>
+            <button type="button" onClick={() => setSelectedDates([])} className="px-3 py-1.5 rounded-lg border border-tertiary bg-primary text-sm font-semibold">Deseleziona tutto</button>
+          </div>
+          <div className="rounded-lg border border-tertiary bg-primary/60 p-3">
+            <p className="text-sm font-semibold">Date selezionate: {effectiveSelectedDates.length}</p>
+            {effectiveSelectedDates.length ? (
+              <ul className="mt-2 flex flex-wrap gap-2" aria-label="Elenco delle date selezionate">
+                {effectiveSelectedDates.map(date => <li key={date} className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs capitalize">{formatTournamentAvailabilityDate(date, { weekday: 'short', day: 'numeric', month: 'short' })}</li>)}
+              </ul>
+            ) : <p className="mt-1 text-xs text-text-secondary">Seleziona almeno una data.</p>}
+          </div>
+          <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
+            {weekends.map((weekend, index) => {
+              const days = [weekend.friday, weekend.saturday, weekend.sunday].filter(date => date >= today);
+              if (!days.length) return null;
+              return (
+                <details key={weekend.friday} open className="availability-disclosure availability-weekend-disclosure">
+                  <summary>Weekend {index + 1}</summary>
+                  <div className="availability-weekend-content grid grid-cols-3 gap-2">
+                    {days.map(date => {
+                      const isSelected = effectiveSelectedDates.includes(date);
+                      const weekday = new Date(`${date}T12:00:00`).getDay();
+                      const dayLabel = weekday === 5 ? 'Venerdì' : weekday === 6 ? 'Sabato' : 'Domenica';
+                      return (
+                        <button key={date} type="button" aria-pressed={isSelected} onClick={() => toggleDateSelection(date)}
+                          className={`min-w-0 p-2 rounded-lg border text-center capitalize ${isSelected ? 'border-accent bg-accent/20 text-accent' : 'border-tertiary hover:bg-tertiary'}`}>
+                          <span className="block text-[10px] font-semibold uppercase tracking-wide">{dayLabel}</span>
+                          <span className="block text-xs mt-1">{formatTournamentAvailabilityDate(date, { weekday: 'short' })}</span>
+                          <span className="block font-bold">{formatTournamentAvailabilityDate(date, { day: 'numeric', month: 'short' })}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </fieldset>
+      </details>
 
       {loggedInPlayerId && (
-        <section className="space-y-3 rounded-xl border border-accent/30 bg-primary/40 p-4">
-          <div>
-            <h4 className="font-bold text-accent">Le mie disponibilità salvate</h4>
-            <p className="text-xs text-text-secondary mt-1">Le date restano salvate anche quando selezioni altri giorni. Puoi modificarle o eliminarle singolarmente.</p>
+        <details open className="availability-disclosure">
+          <summary>
+            <span>
+              <span className="block text-accent">Le mie disponibilità salvate</span>
+              <span className="mt-1 block text-xs font-normal text-text-secondary">Le date restano salvate anche quando selezioni altri giorni. Puoi modificarle o eliminarle singolarmente.</span>
+            </span>
+          </summary>
+          <div className="availability-disclosure-content space-y-3">
+            {personalDates.length === 0 ? <p className="text-sm text-text-secondary">Non hai ancora disponibilità salvate.</p> : (
+              <ul className="space-y-2">
+                {personalDates.map(date => {
+                  const datePeriods = ownPeriods.filter(entry => entry.date === date);
+                  return (
+                    <li key={date} className="flex flex-col gap-3 rounded-lg border border-tertiary bg-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="font-semibold capitalize">{formatTournamentAvailabilityDate(date)}</div>
+                        {ownUnavailableDates.has(date) ? <div className="text-sm text-red-300">Non disponibile</div> : (
+                          datePeriods.length ? datePeriods.map(entry => {
+                            const venue = TOURNAMENT_VENUES.find(item => item.id === entry.venueId);
+                            const period = TOURNAMENT_AVAILABILITY_PERIODS.find(item => item.id === entry.period);
+                            return <div key={`${entry.venueId}-${entry.period}`} className="text-sm text-text-secondary">{venue?.name}: {period?.label}</div>;
+                          }) : <div className="text-sm text-text-secondary">Nessuna fascia indicata</div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button type="button" onClick={() => savePersonalEditDate(date)} disabled={savingPreference}
+                          className="rounded-lg bg-tertiary px-3 py-2 text-sm font-semibold">Modifica</button>
+                        <button type="button" onClick={() => void deletePersonalDate(date)} disabled={savingPreference}
+                          className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200">Elimina</button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-          {personalDates.length === 0 ? <p className="text-sm text-text-secondary">Non hai ancora disponibilità salvate.</p> : (
-            <ul className="space-y-2">
-              {personalDates.map(date => {
-                const datePeriods = ownPeriods.filter(entry => entry.date === date);
-                return (
-                  <li key={date} className="flex flex-col gap-3 rounded-lg border border-tertiary bg-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="font-semibold capitalize">{formatTournamentAvailabilityDate(date)}</div>
-                      {ownUnavailableDates.has(date) ? <div className="text-sm text-red-300">Non disponibile</div> : (
-                        datePeriods.length ? datePeriods.map(entry => {
-                          const venue = TOURNAMENT_VENUES.find(item => item.id === entry.venueId);
-                          const period = TOURNAMENT_AVAILABILITY_PERIODS.find(item => item.id === entry.period);
-                          return <div key={`${entry.venueId}-${entry.period}`} className="text-sm text-text-secondary">{venue?.name}: {period?.label}</div>;
-                        }) : <div className="text-sm text-text-secondary">Nessuna fascia indicata</div>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button type="button" onClick={() => savePersonalEditDate(date)} disabled={savingPreference}
-                        className="rounded-lg bg-tertiary px-3 py-2 text-sm font-semibold">Modifica</button>
-                      <button type="button" onClick={() => void deletePersonalDate(date)} disabled={savingPreference}
-                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200">Elimina</button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        </details>
       )}
 
-      <section className="space-y-4" aria-label="Imposta fasce per le date selezionate">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h4 className="font-bold text-lg">3. Imposta disponibilità</h4>
-            <p className="text-xs text-text-secondary mt-1">Le fasce selezionate vengono salvate subito e solo sulle date selezionate.</p>
-          </div>
+      <details open className="availability-disclosure" aria-label="Imposta fasce per le date selezionate">
+        <summary>
+          <span>
+            <span className="block text-lg">3. Imposta disponibilità</span>
+            <span className="mt-1 block text-xs font-normal text-text-secondary">Le fasce selezionate vengono salvate subito e solo sulle date selezionate.</span>
+          </span>
+        </summary>
+        <div className="availability-disclosure-content space-y-4">
           {loggedInPlayerId && (
-            <button type="button" onClick={() => void toggleDateUnavailability()}
-              disabled={savingPreference || savingVenues || effectiveSelectedDates.length === 0}
-              className={`px-4 py-2 rounded-lg font-semibold disabled:opacity-50 ${allSelectedUnavailable ? 'bg-red-700 text-white' : 'bg-tertiary text-text-primary'}`}>
-              {allSelectedUnavailable ? 'Rimuovi non disponibilità' : 'Segna date selezionate non disponibili'}
-            </button>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => void toggleDateUnavailability()}
+                disabled={savingPreference || savingVenues || effectiveSelectedDates.length === 0}
+                className={`px-4 py-2 rounded-lg font-semibold disabled:opacity-50 ${allSelectedUnavailable ? 'bg-red-700 text-white' : 'bg-tertiary text-text-primary'}`}>
+                {allSelectedUnavailable ? 'Rimuovi non disponibilità' : 'Segna date selezionate non disponibili'}
+              </button>
+            </div>
           )}
-        </div>
         {effectiveSelectedDates.length === 0 ? <p className="rounded-lg border border-dashed border-tertiary p-4 text-sm text-text-secondary">Seleziona una o più date per impostare o rimuovere le fasce.</p> : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).map(venue => (
@@ -323,11 +336,18 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
             ))}
           </div>
         )}
-      </section>
+        </div>
+      </details>
 
-      <section className="space-y-3">
-        <h4 className="font-bold">Disponibilità dichiarate · {selectedGroup.name}</h4>
-        <p className="text-xs text-text-secondary">Sono mostrati solo i giocatori che hanno dichiarato almeno una fascia o una non disponibilità, in ordine di data. Entrambi i circoli sono sempre visibili; “—” indica che non è stata dichiarata una fascia.</p>
+      <details open className="availability-disclosure">
+        <summary>
+          <span>
+            <span className="block">Disponibilità dichiarate · {selectedGroup.name}</span>
+            <span className="mt-1 block text-xs font-normal text-text-secondary">Sono mostrati i giocatori con disponibilità dichiarate, in ordine di data.</span>
+          </span>
+        </summary>
+        <div className="availability-disclosure-content space-y-3">
+        <p className="text-xs text-text-secondary">Entrambi i circoli sono sempre visibili; “—” indica che non è stata dichiarata una fascia.</p>
         <div className="overflow-x-auto rounded-lg border border-tertiary">
           <table className="min-w-full text-sm bg-primary">
             <thead>
@@ -366,7 +386,8 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
             </tbody>
           </table>
         </div>
-      </section>
+        </div>
+      </details>
     </div>
   );
 }
