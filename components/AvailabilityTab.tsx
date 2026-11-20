@@ -167,6 +167,11 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
     const dates = [...new Set([...periods.map(entry => entry.date), ...unavailableDates])].sort();
     return { player, periods, unavailableDates, dates };
   }).filter(row => row.dates.length > 0);
+  const availabilityRows = participantRows
+    .flatMap(({ player, periods, unavailableDates, dates }) =>
+      dates.map(date => ({ player, periods, unavailableDates, date })),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   return (
     <div className="max-w-6xl mx-auto bg-secondary rounded-xl p-4 sm:p-6 shadow space-y-6">
@@ -322,33 +327,39 @@ export default function AvailabilityTab({ event, tournament, selectedGroup, logg
 
       <section className="space-y-3">
         <h4 className="font-bold">Disponibilità dichiarate · {selectedGroup.name}</h4>
-        <p className="text-xs text-text-secondary">Sono mostrati solo i giocatori che hanno dichiarato almeno una fascia o una non disponibilità.</p>
+        <p className="text-xs text-text-secondary">Sono mostrati solo i giocatori che hanno dichiarato almeno una fascia o una non disponibilità, in ordine di data. Entrambi i circoli sono sempre visibili; “—” indica che non è stata dichiarata una fascia.</p>
         <div className="overflow-x-auto rounded-lg border border-tertiary">
           <table className="min-w-full text-sm bg-primary">
             <thead>
               <tr className="text-left border-b border-tertiary">
                 <th className="p-3">Giocatore</th>
                 <th className="p-3">Data</th>
-                {TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).map(venue => <th key={venue.id} className="p-3">{venue.name}</th>)}
+                {TOURNAMENT_VENUES.map(venue => <th key={venue.id} className="p-3">{venue.name}</th>)}
                 <th className="p-3">Giornata</th>
               </tr>
             </thead>
             <tbody>
-              {participantRows.flatMap(({ player, periods, unavailableDates, dates }) => dates.map(date => (
+              {availabilityRows.map(({ player, periods, unavailableDates, date }) => (
                 <tr key={`${player.id}-${date}`} className="border-b border-tertiary last:border-0 align-top">
                   <td className="p-3 font-medium">{player.name}</td>
                   <td className="p-3 capitalize">{formatTournamentAvailabilityDate(date, { weekday: 'short', day: 'numeric', month: 'short' })}</td>
-                  {TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).map(venue => {
+                  {TOURNAMENT_VENUES.map(venue => {
                     const venuePeriods = periods.filter(entry => entry.date === date && entry.venueId === venue.id)
                       .map(entry => TOURNAMENT_AVAILABILITY_PERIODS.find(period => period.id === entry.period)?.label)
                       .filter(Boolean);
-                    return <td key={venue.id} className="p-3">{unavailableDates.includes(date) ? <span className="text-red-400">Non disponibile</span> : venuePeriods.length ? venuePeriods.join(', ') : '—'}</td>;
+                    return <td key={venue.id} className="p-3">{unavailableDates.includes(date)
+                      ? <span className="inline-flex rounded-md bg-red-500/10 px-2 py-1 font-semibold text-red-400">Non disponibile</span>
+                      : venuePeriods.length
+                        ? <span className="inline-flex rounded-md bg-green-500/10 px-2 py-1 font-semibold text-green-400">{venuePeriods.join(', ')}</span>
+                        : '—'}</td>;
                   })}
-                  <td className="p-3">{unavailableDates.includes(date) ? <span className="font-semibold text-red-400">Non disponibile</span> : 'Disponibile'}</td>
+                  <td className="p-3">{unavailableDates.includes(date)
+                    ? <span className="inline-flex rounded-md bg-red-500/10 px-2 py-1 font-semibold text-red-400">Non disponibile</span>
+                    : <span className="inline-flex rounded-md bg-green-500/10 px-2 py-1 font-semibold text-green-400">Disponibile</span>}</td>
                 </tr>
-              )))}
+              ))}
               {participantRows.length === 0 && (
-                <tr><td className="p-3 text-text-secondary" colSpan={TOURNAMENT_VENUES.filter(venue => selectedVenues.has(venue.id)).length + 3}>
+                <tr><td className="p-3 text-text-secondary" colSpan={TOURNAMENT_VENUES.length + 3}>
                   {selectedGroup.name === 'Nessun girone assegnato' ? 'Non sei assegnato a un girone.' : 'Nessuna disponibilità o non disponibilità dichiarata.'}
                 </td></tr>
               )}

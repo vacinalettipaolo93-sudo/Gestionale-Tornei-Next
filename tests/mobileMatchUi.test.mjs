@@ -40,7 +40,7 @@ const load = async name => (await import(pathToFileURL(path.join(temporary, `${n
 const MatchList = await load('MatchList');
 const PadelIndividualRankingView = await load('PadelIndividualRankingView');
 const GroupManagement = await load('GroupManagement');
-const players = ['a', 'b', 'c', 'd'].map(id => ({ id, name: `Player ${id}`, status: 'confirmed', avatar: '', phone: '' }));
+const players = ['a', 'b', 'c', 'd'].map(id => ({ id, name: `Player ${id}`, status: 'confirmed', avatar: 'avatar.png', phone: '' }));
 const match = (id, p1 = 'a', p2 = 'b', overrides = {}) => ({
   id, player1Id: p1, player2Id: p2, score1: null, score2: null, status: 'pending', ...overrides,
 });
@@ -73,6 +73,23 @@ test('legacy scheduled matches without slotId stay visible with own booking acti
   assert.match(html, /Modifica prenotazione/);
   assert.match(html, /Annulla prenotazione/);
   assert.match(html, /Inserisci risultato/);
+});
+
+test('scheduled match shows both players around vs, with court details below on all screen sizes', () => {
+  const html = renderMatches([match('booked', 'a', 'b', {
+    status: 'scheduled',
+    scheduledTime: '2035-06-03T18:00:00Z',
+    location: 'Canottieri Salò',
+    field: 'Campo 2',
+  })]);
+  const firstPlayer = html.indexOf('Player a');
+  const versus = html.indexOf('>vs</div>', firstPlayer);
+  const secondPlayer = html.indexOf('Player b', versus);
+  const courtDetails = html.indexOf('Campo di gioco', secondPlayer);
+
+  assert.ok(firstPlayer >= 0 && firstPlayer < versus);
+  assert.ok(versus < secondPlayer && secondPlayer < courtDetails);
+  assert.match(html.slice(courtDetails), /Canottieri Salò · Campo 2/);
 });
 
 test('own result controls remain accessible outside the original group and completed filter excludes other players', () => {

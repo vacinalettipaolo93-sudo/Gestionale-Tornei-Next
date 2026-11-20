@@ -3,6 +3,7 @@ import { saveEventChanges } from '../services/eventDataService';
 import { type Event, type Group, type Match, type PadelTeam, type Player, type Tournament } from '../types';
 import { TrashIcon } from './Icons';
 import { PersistenceFeedback, usePersistenceAction } from './usePersistenceAction';
+import { getMissingGroupMatchups } from '../utils/groupMatchGeneration';
 
 interface GroupManagementProps {
     event: Event;
@@ -131,34 +132,23 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
             // Determine if this group must be double round-robin (andata e ritorno)
             const isDouble = !!(tournament.settings?.groupRoundRobin && tournament.settings.groupRoundRobin[group.id]);
 
-            const newMatches: Match[] = [];
-            for (let i = 0; i < group.playerIds.length; i++) {
-                for (let j = i + 1; j < group.playerIds.length; j++) {
-                    // match A vs B
-                    newMatches.push({
-                        id: `m${Date.now()}${i}${j}`,
-                        player1Id: group.playerIds[i],
-                        player2Id: group.playerIds[j],
-                        score1: null,
-                        score2: null,
-                        status: 'pending',
-                    });
-                    // if double round-robin, add reverse fixture
-                    if (isDouble) {
-                        newMatches.push({
-                            id: `m${Date.now()}${j}${i}_r`,
-                            player1Id: group.playerIds[j],
-                            player2Id: group.playerIds[i],
-                            score1: null,
-                            score2: null,
-                            status: 'pending',
-                        });
-                    }
-                }
-            }
+            const newMatchups = getMissingGroupMatchups(
+                group.playerIds,
+                group.matches ?? [],
+                isDouble,
+            );
+            if (newMatchups.length === 0) return;
+            const newMatches: Match[] = newMatchups.map(([player1Id, player2Id]) => ({
+                id: `m${makeId()}`,
+                player1Id,
+                player2Id,
+                score1: null,
+                score2: null,
+                status: 'pending',
+            }));
 
             const updatedGroups = tournament.groups.map(g =>
-                g.id === group.id ? { ...g, matches: newMatches } : g
+                g.id === group.id ? { ...g, matches: [...(g.matches ?? []), ...newMatches] } : g
             );
 
             await saveEventChanges(event, {
@@ -432,7 +422,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({ event, tournament, se
                                 disabled={group.playerIds.length < 2}
                                 className="bg-highlight hover:bg-highlight/90 text-white font-bold py-2 px-3 rounded-lg text-sm transition-colors disabled:bg-tertiary disabled:cursor-not-allowed"
                             >
-                                Genera Partite
+                                {(group.matches?.length ?? 0) > 0 ? 'Aggiungi Partite Mancanti' : 'Genera Partite'}
                             </button>
                             <button
                                 onClick={() => openEditGroup(group)}
