@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const temporary = mkdtempSync(path.join(os.tmpdir(), 'mobile-match-ui-'));
 after(() => rmSync(temporary, { recursive: true }));
 await build({
-  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx'], bundle: true, platform: 'node',
+  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx'], bundle: true, platform: 'node',
   format: 'esm', outdir: temporary, outExtension: { '.js': '.mjs' },
   plugins: [{
     name: 'render-dependencies',
@@ -40,6 +40,7 @@ const load = async name => (await import(pathToFileURL(path.join(temporary, `${n
 const MatchList = await load('MatchList');
 const PadelIndividualRankingView = await load('PadelIndividualRankingView');
 const GroupManagement = await load('GroupManagement');
+const TournamentTabBar = await load('TournamentTabBar');
 const players = ['a', 'b', 'c', 'd'].map(id => ({ id, name: `Player ${id}`, status: 'confirmed', avatar: 'avatar.png', phone: '' }));
 const match = (id, p1 = 'a', p2 = 'b', overrides = {}) => ({
   id, player1Id: p1, player2Id: p2, score1: null, score2: null, status: 'pending', ...overrides,
@@ -90,6 +91,25 @@ test('scheduled match shows both players around vs, with court details below on 
   assert.ok(firstPlayer >= 0 && firstPlayer < versus);
   assert.ok(versus < secondPlayer && secondPlayer < courtDetails);
   assert.match(html.slice(courtDetails), /Canottieri Salò · Campo 2/);
+});
+
+test('tournament tabs stay in one swipeable row with a clearly selected section', () => {
+  const tabs = [
+    { id: 'standings', label: 'Classifica' },
+    { id: 'matches', label: 'Partite' },
+    { id: 'availability', label: 'Disponibilità di gioco' },
+    { id: 'groups', label: 'Gestione Gironi' },
+  ];
+  const html = renderToStaticMarkup(React.createElement(TournamentTabBar, {
+    tabs, activeTab: 'availability', onSelect() {},
+  }));
+  const nav = html.match(/<nav[\s\S]*?<\/nav>/)?.[0];
+  assert.ok(nav);
+  assert.match(nav, /aria-label="Sezioni del torneo"/);
+  assert.match(nav, /flex-nowrap[^"]*overflow-x-auto/);
+  for (const tab of tabs) assert.ok(nav.includes(tab.label));
+  assert.match(nav, /aria-current="page"[^>]*>Disponibilità di gioco<\/button>/);
+  assert.equal((nav.match(/whitespace-nowrap/g) ?? []).length, tabs.length);
 });
 
 test('own result controls remain accessible outside the original group and completed filter excludes other players', () => {
