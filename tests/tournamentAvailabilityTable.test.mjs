@@ -88,5 +88,6 @@ test('availability sections and each weekend are independently collapsible and i
   assert.match(html, /<summary>Weekend 1<\/summary>/);
   assert.match(html, /Le mie disponibilità salvate/);
   assert.match(html, /3\. Imposta disponibilità/);
+  assert.ok(html.indexOf('3. Imposta disponibilità') < html.indexOf('Le mie disponibilità salvate'));
   assert.match(html, /Disponibilità dichiarate · Girone A/);
 });
