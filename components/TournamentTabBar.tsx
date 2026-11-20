@@ -9,9 +9,17 @@ interface Props<T extends string> {
   tabs: TournamentTab<T>[];
   activeTab: T;
   onSelect: (tabId: T) => void;
+  ariaLabel?: string;
+  className?: string;
 }
 
-export default function TournamentTabBar<T extends string>({ tabs, activeTab, onSelect }: Props<T>) {
+export default function TournamentTabBar<T extends string>({
+  tabs,
+  activeTab,
+  onSelect,
+  ariaLabel = 'Sezioni del torneo',
+  className = 'mb-6',
+}: Props<T>) {
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -19,7 +27,7 @@ export default function TournamentTabBar<T extends string>({ tabs, activeTab, on
   }, [activeTab]);
 
   return (
-    <nav aria-label="Sezioni del torneo" className="mb-6 rounded-xl border border-tertiary/50 bg-secondary/60 p-1.5">
+    <nav aria-label={ariaLabel} className={`${className} rounded-xl border border-tertiary/50 bg-secondary/60 p-1.5`}>
       <div className="tournament-tab-scroll flex flex-nowrap snap-x snap-mandatory items-center gap-1.5 overflow-x-auto overscroll-x-contain">
         {tabs.map(tab => {
           const isActive = activeTab === tab.id;
