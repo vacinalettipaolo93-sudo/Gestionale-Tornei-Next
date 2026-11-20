@@ -76,3 +76,17 @@ test('participant table always shows both venues while personal editing follows 
 test('empty participant table spans both venue columns regardless of personal preference', () => {
   assert.match(render('a', []).match(/<table[\s\S]*?<\/table>/)[0], /colSpan="5"/i);
 });
+
+test('availability sections and each weekend are independently collapsible and initially open', () => {
+  const html = render('a');
+  const details = [...html.matchAll(/<details([^>]*)>/g)].map(match => match[1]);
+
+  assert.equal(details.length, 17);
+  assert.ok(details.every(attributes => attributes.includes('open=""')));
+  assert.match(html, /<summary>1\. Per quali circoli vuoi indicare la disponibilità\?<\/summary>/);
+  assert.match(html, /<summary>2\. Seleziona le date da impostare<\/summary>/);
+  assert.match(html, /<summary>Weekend 1<\/summary>/);
+  assert.match(html, /Le mie disponibilità salvate/);
+  assert.match(html, /3\. Imposta disponibilità/);
+  assert.match(html, /Disponibilità dichiarate · Girone A/);
+});

@@ -6,6 +6,7 @@ import BookedVenueSlots from './BookedVenueSlots';
 import EventPlayersView from './EventPlayersView';
 import { PlusIcon, TrashIcon } from './Icons';
 import RegolamentoGironiPanel from './RegolamentoGironiPanel';
+import TournamentTabBar from './TournamentTabBar';
 import { useSyncedDraft } from './usePersistenceAction';
 import { useSectionScroll } from './useSectionScroll';
 import { getTeamForPlayer, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
@@ -27,6 +28,15 @@ interface EventViewProps {
 const makeId = () => `${Date.now()}${Math.floor(Math.random() * 10000)}`;
 
 type AdminEventSection = 'tournaments' | 'players' | 'rules' | 'groupRules' | 'matchControl' | 'bookedSlots';
+
+const adminEventTabs: { id: AdminEventSection; label: string }[] = [
+  { id: 'tournaments', label: 'Tornei' },
+  { id: 'players', label: 'Lista giocatori' },
+  { id: 'bookedSlots', label: 'Prenotazioni partite' },
+  { id: 'rules', label: 'Regolamento torneo' },
+  { id: 'groupRules', label: 'Regolamento gironi' },
+  { id: 'matchControl', label: 'Controllo partite' },
+];
 
 const EventView: React.FC<EventViewProps> = ({
   event,
@@ -231,21 +241,21 @@ const EventView: React.FC<EventViewProps> = ({
 
   return (
     <div ref={sectionRef} className="min-w-0 scroll-mt-4">
-      <div className="bg-primary p-6 rounded-xl shadow-lg mb-6">
-        <div className="flex flex-wrap justify-between items-start gap-4">
+      <div className="bg-primary p-4 sm:p-6 rounded-xl shadow-lg mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
           <div className="flex-1 min-w-0">
-            <h1 className="text-3xl font-bold text-white mb-1">{event.name}</h1>
+            <h1 className="text-2xl sm:text-3xl leading-tight font-bold text-white mb-1 break-words">{event.name}</h1>
             <div className="text-sm text-text-secondary">
               Codice Invito: <span className="font-bold text-accent">{event.invitationCode}</span>
             </div>
           </div>
 
           {isOrganizer && (
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="w-full sm:w-auto flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={openAddTournament}
-                className="bg-accent px-5 py-2 rounded-lg text-white font-bold hover:bg-accent/80 shadow transition-all flex items-center gap-2"
+                className="w-full sm:w-auto justify-center bg-accent px-5 py-2 rounded-lg text-white font-bold hover:bg-accent/80 shadow transition-all flex items-center gap-2"
               >
                 <PlusIcon className="w-4 h-4" />
                 + Aggiungi Torneo
@@ -256,49 +266,13 @@ const EventView: React.FC<EventViewProps> = ({
 
         {/* ===== Top admin menu (only organizers) ===== */}
         {isOrganizer && (
-          <nav className="mt-6 bg-secondary/20 rounded p-3 flex flex-wrap gap-2" aria-label="Menu amministratore evento">
-            <button
-              className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'tournaments' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-              onClick={() => setActiveAdminSection('tournaments')}
-            >
-              Tornei
-            </button>
-
-            <button
-              className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'players' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-              onClick={() => setActiveAdminSection('players')}
-            >
-              Lista giocatori
-            </button>
-
-            <button
-              className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'bookedSlots' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-              onClick={() => setActiveAdminSection('bookedSlots')}
-            >
-              Prenotazioni partite
-            </button>
-
-            <button
-              className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'rules' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-              onClick={() => setActiveAdminSection('rules')}
-            >
-              Regolamento torneo
-            </button>
-
-            <button
-              className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'groupRules' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-              onClick={() => setActiveAdminSection('groupRules')}
-            >
-              Regolamento gironi
-            </button>
-
-            <button
-              className={`px-3 py-1 rounded text-text-primary text-sm transition-colors ${activeAdminSection === 'matchControl' ? 'bg-accent text-white' : 'bg-tertiary hover:bg-tertiary/90'}`}
-              onClick={() => setActiveAdminSection('matchControl')}
-            >
-              Controllo partite
-            </button>
-          </nav>
+          <TournamentTabBar
+            tabs={adminEventTabs}
+            activeTab={activeAdminSection}
+            onSelect={setActiveAdminSection}
+            ariaLabel="Menu amministratore evento"
+            className="mt-6 mb-0"
+          />
         )}
       </div>
 

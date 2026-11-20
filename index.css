@@ -68,6 +68,47 @@ input, select, textarea { accent-color: var(--app-accent); }
 .bg-tertiary { background-color: var(--app-raised); }
 .text-text-primary { color: var(--app-text); }
 .text-text-secondary { color: var(--app-text-muted); }
+.availability-disclosure {
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 1rem;
+  background: rgb(17 29 48 / 55%);
+}
+.availability-disclosure > summary {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .75rem 1rem;
+  color: var(--app-text);
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.availability-disclosure > summary::-webkit-details-marker { display: none; }
+.availability-disclosure > summary::after {
+  width: .55rem;
+  height: .55rem;
+  flex: 0 0 auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  content: "";
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+.availability-disclosure[open] > summary { border-bottom: 1px solid var(--app-border); }
+.availability-disclosure[open] > summary::after { transform: rotate(225deg); }
+.availability-disclosure > summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -3px; }
+.availability-disclosure-content { padding: 1rem; }
+.availability-weekend-disclosure { border-radius: .75rem; background: rgb(11 18 32 / 45%); }
+.availability-weekend-disclosure > summary {
+  min-height: 2.75rem;
+  padding: .5rem .75rem;
+  color: var(--app-text-muted);
+  font-size: .875rem;
+}
+.availability-weekend-content { padding: 0 .75rem .75rem; }
 .bg-secondary.rounded-lg,
 .bg-secondary.rounded-xl,
 .bg-secondary.rounded-2xl {
