@@ -26,7 +26,7 @@ writeFileSync(availabilityPath, readFileSync(availabilityPath, 'utf8')
 const periodsPath = path.join(tempDir, 'utils/tournamentAvailabilityPeriods.js');
 writeFileSync(periodsPath, readFileSync(periodsPath, 'utf8')
   .replaceAll("'./tournamentVenues'", "'./tournamentVenues.js'"));
-const { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability } =
+const { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability, hasTournamentAvailability } =
   await import(pathToFileURL(finderPath).href);
 const { getAvailabilityDateKey, getTournamentAvailabilitySlots, normalizeTournamentSlot } =
   await import(pathToFileURL(path.join(tempDir, 'utils/tournamentAvailability.js')).href);
@@ -101,6 +101,16 @@ test('ranking preserves supplied eligibility and sorts most compatible opponents
   assert.deepEqual(getRankingMatchSuggestions('a', [players[1]], saved).map(item => item.id), ['b']);
 });
 
+test('ranking counts shared day-periods and sorts players by the most overlapping availability', () => {
+  const saved = {
+    a: { dayPeriods: { monday: ['morning', 'afternoon', 'evening'] } },
+    b: { dayPeriods: { monday: ['morning'] } },
+    c: { dayPeriods: { monday: ['morning', 'afternoon'] } },
+  };
+  const suggestions = getRankingMatchSuggestions('a', [players[1], players[2]], saved);
+  assert.deepEqual(suggestions.map(item => [item.id, item.commonCount]), [['c', 2], ['b', 1]]);
+});
+
 test('Padel individual compares real players, not team ids, and leaves room for free partners', () => {
   const suggestions = getRankingMatchSuggestions('a', players, { a: weekly(), d: weekly() });
   assert.deepEqual(suggestions.map(item => item.id), ['d']);
@@ -134,12 +144,43 @@ test('remaining playoff and consolation opponents are included, unrelated groups
   const t = tournament({
     groups: [{ matches: [pending('ef', 'e', 'f')] }],
     playoffMatches: [pending('po-ab', 'a', 'b')],
-    consolationMatches: [pending('co-ac', 'c', 'a', { status: 'scheduled' })],
+    consolationMatches: [pending('co-ac', 'c', 'a')],
   });
   assert.deepEqual(
     getTournamentMatchSuggestions(event(t), t, 'a', availability(['a', 'b', 'c', 'e', 'f']), now).map(item => item.id),
     ['b', 'c'],
   );
+});
+
+test('tournament search shows only opponents with matches still to arrange, not already booked fixtures', () => {
+  const t = tournament({ groups: [{ matches: [
+    pending('pending', 'a', 'b'),
+    pending('booked', 'a', 'c', { status: 'scheduled' }),
+    pending('completed', 'a', 'd', { status: 'completed', score1: 6, score2: 4 }),
+  ] }] });
+  assert.deepEqual(
+    getTournamentMatchSuggestions(event(t), t, 'a', availability(['a', 'b', 'c', 'd']), now).map(item => item.id),
+    ['b'],
+  );
+});
+
+test('tournament availability recognizes future date-period declarations, exclusions and legacy slots', () => {
+  const t = tournament({ timeSlots: [] });
+  const e = event(t, { globalTimeSlots: [] });
+  const periods = {
+    slotPrefMap: {},
+    dateUnavailMap: {},
+    periodMap: { a: [{ date: '2030-06-08', venueId: 'canottieri-salo', period: 'MORNING' }] },
+  };
+
+  assert.equal(hasTournamentAvailability(e, t, 'a', periods, now), true);
+  periods.dateUnavailMap.a = new Set(['2030-06-08']);
+  assert.equal(hasTournamentAvailability(e, t, 'a', periods, now), false);
+  periods.dateUnavailMap.a.clear();
+  periods.venueMap = { a: new Set(['paitone-arena']) };
+  assert.equal(hasTournamentAvailability(e, t, 'a', periods, now), false);
+  const legacyTournament = tournament();
+  assert.equal(hasTournamentAvailability(event(legacyTournament), legacyTournament, 'a', availability(), now), true);
 });
 
 test('tournaments never infer availability from an absent preference or from nonexistent slot ids', () => {

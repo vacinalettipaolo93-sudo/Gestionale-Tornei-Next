@@ -16,6 +16,7 @@ export interface MatchSuggestion {
   id: string;
   name: string;
   commonTimes: string[];
+  commonCount: number;
   contacts: Player[];
   compatibility?: MatchCompatibility;
 }
@@ -33,6 +34,25 @@ export function hasTournamentSlotPreference(availability: TournamentAvailability
   return !!availability.slotPrefMap[playerId]?.has(slot.id)
     && !availability.dateUnavailMap[playerId]?.has(getAvailabilityDateKey(slot.start))
     && (!selectedVenues || !!venueId && selectedVenues.has(venueId));
+}
+
+export function hasTournamentAvailability(
+  event: Event,
+  tournament: Tournament,
+  playerId: string,
+  availability: TournamentAvailability,
+  now = Date.now(),
+): boolean {
+  const today = getAvailabilityDateKey(new Date(now).toISOString());
+  const selectedVenues = availability.venueMap?.[playerId];
+  const hasPeriodAvailability = (availability.periodMap?.[playerId] ?? []).some(item =>
+    item.date >= today
+    && !availability.dateUnavailMap[playerId]?.has(item.date)
+    && (!selectedVenues || selectedVenues.has(item.venueId)),
+  );
+  const hasLegacySlotPreference = getTournamentAvailabilitySlots(event, tournament, now)
+    .some(slot => hasTournamentSlotPreference(availability, playerId, slot));
+  return hasPeriodAvailability || hasLegacySlotPreference;
 }
 
 const slotVenueKey = (slot: TimeSlot) => getSlotVenueId(slot) ?? slot.location.trim().toLocaleLowerCase('it');
@@ -82,14 +102,18 @@ export function getRankingMatchSuggestions(
     .filter(player => player.id !== currentPlayerId && player.status === 'confirmed')
     .map(player => {
       const opponentDays = normalizeAvailabilityByDay(availabilities[player.id]);
-      const commonTimes = AVAILABILITY_DAYS.flatMap(day => {
+      const commonPeriodsByDay = AVAILABILITY_DAYS.map(day => {
         const periods = ownDays[day.value].filter(period => opponentDays[day.value].includes(period));
-        return periods.length > 0 ? [`${day.label}: ${formatAvailabilityPeriods(periods)}`] : [];
+        return { day, periods };
       });
-      return { id: player.id, name: player.name, commonTimes, contacts: [player] };
+      const commonTimes = commonPeriodsByDay
+        .filter(({ periods }) => periods.length > 0)
+        .map(({ day, periods }) => `${day.label}: ${formatAvailabilityPeriods(periods)}`);
+      const commonCount = commonPeriodsByDay.reduce((count, item) => count + item.periods.length, 0);
+      return { id: player.id, name: player.name, commonTimes, commonCount, contacts: [player] };
     })
-    .filter(suggestion => suggestion.commonTimes.length > 0)
-    .sort((left, right) => right.commonTimes.length - left.commonTimes.length || left.name.localeCompare(right.name, 'it'));
+    .filter(suggestion => suggestion.commonCount > 0)
+    .sort((left, right) => right.commonCount - left.commonCount || left.name.localeCompare(right.name, 'it'));
 }
 
 export function getTournamentMatchSuggestions(
@@ -115,7 +139,7 @@ export function getTournamentMatchSuggestions(
     ...(tournament.consolationMatches ?? []),
   ];
   for (const match of matches) {
-    if (match.status === 'completed' || (match.score1 != null && match.score2 != null)) continue;
+    if (match.status !== 'pending' || (match.score1 != null && match.score2 != null)) continue;
     if (match.player1Id === ownCompetitorId && match.player2Id) opponents.add(match.player2Id);
     if (match.player2Id === ownCompetitorId && match.player1Id) opponents.add(match.player1Id);
   }
@@ -188,6 +212,7 @@ export function getTournamentMatchSuggestions(
       }));
     })
     .filter(suggestion => suggestion.commonTimes.length > 0)
+    .map(suggestion => ({ ...suggestion, commonCount: suggestion.commonTimes.length }))
     .sort((left, right) => compatibilityOrder[left.compatibility] - compatibilityOrder[right.compatibility]
-      || right.commonTimes.length - left.commonTimes.length || left.name.localeCompare(right.name, 'it'));
+      || right.commonCount - left.commonCount || left.name.localeCompare(right.name, 'it'));
 }

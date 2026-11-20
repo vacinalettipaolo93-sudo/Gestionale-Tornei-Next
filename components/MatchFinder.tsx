@@ -1,9 +1,8 @@
 import React from 'react';
 import { type Event, type Player, type SummerPlayerAvailability, type Tournament } from '../types';
-import { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability, hasTournamentSlotPreference, type MatchSuggestion } from '../utils/matchFinder';
+import { getRankingMatchSuggestions, getTournamentMatchSuggestions, hasRankingAvailability, hasTournamentAvailability, type MatchSuggestion } from '../utils/matchFinder';
 import { useTournamentAvailability } from './useTournamentAvailability';
 import { useSlotClock } from './useSlotClock';
-import { getTournamentAvailabilitySlots } from '../utils/tournamentAvailability';
 
 interface MatchFinderProps {
   suggestions: MatchSuggestion[];
@@ -38,27 +37,43 @@ const MatchFinder: React.FC<MatchFinderProps> = ({
       </p>
     ) : suggestions.length === 0 ? (
       <p className="text-sm text-text-secondary">
-        Nessun avversario con disponibilità in comune al momento. I suggerimenti si aggiornano quando gli altri giocatori inseriscono o modificano le disponibilità.
+        Nessun giocatore ancora da sfidare con disponibilità compatibili. I suggerimenti si aggiornano quando vengono inserite o modificate le disponibilità.
       </p>
     ) : (
       <div className="grid gap-3 md:grid-cols-2">
-        {suggestions.map(suggestion => (
+        {suggestions.map((suggestion, index) => (
           <div key={`${suggestion.id}:${suggestion.compatibility ?? 'ranking'}`} className="bg-primary rounded-lg border border-tertiary p-4 space-y-3">
-            <h4 className="font-semibold text-text-primary break-words">{suggestion.name}</h4>
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-sm font-bold text-accent">
+                {index + 1}
+              </span>
+              <div className="flex shrink-0 -space-x-3">
+                {suggestion.contacts.map(player => player.avatar ? (
+                  <img key={player.id} src={player.avatar} alt="" className="h-10 w-10 rounded-full border-2 border-primary object-cover" />
+                ) : (
+                  <span key={player.id} aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-primary bg-tertiary text-sm font-bold text-text-primary">
+                    {player.name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase()}
+                  </span>
+                ))}
+              </div>
+              <div className="min-w-0">
+                <h4 className="break-words font-semibold text-text-primary">{suggestion.name}</h4>
+                <p className="text-sm text-text-secondary">
+                  {suggestion.commonCount} {suggestion.compatibility
+                    ? suggestion.commonCount === 1 ? 'occasione compatibile' : 'occasioni compatibili'
+                    : suggestion.commonCount === 1 ? 'fascia in comune' : 'fasce in comune'}
+                </p>
+              </div>
+            </div>
             {suggestion.compatibility && (
               <p className={`text-sm font-bold ${suggestion.compatibility === 'exact' ? 'text-green-400' : 'text-highlight'}`}>
                 {suggestion.compatibility === 'exact'
-                  ? 'Compatibilità esatta: stesso centro, data e ora'
+                  ? 'Compatibilità più alta'
                   : suggestion.compatibility === 'different-time'
-                    ? 'Da concordare: stessa data e centro, orari diversi'
-                    : 'Da concordare: stessa data, centri diversi (anche gli orari possono differire)'}
+                    ? 'Da concordare: stesso centro'
+                    : 'Da concordare: centri diversi'}
               </p>
             )}
-            <div className="flex flex-wrap gap-2">
-              {suggestion.commonTimes.map(time => (
-                <span key={time} className={`text-sm rounded px-2 py-1 ${suggestion.compatibility && suggestion.compatibility !== 'exact' ? 'bg-primary text-highlight border border-tertiary' : 'bg-green-500/10 text-green-400'}`}>{time}</span>
-              ))}
-            </div>
             <div className="flex flex-wrap gap-2">
               {suggestion.contacts.map(player => (
                 <button
@@ -100,7 +115,7 @@ export function RankingMatchFinder({
       {...actions}
       hasAvailability={hasRankingAvailability(availabilities[currentPlayerId])}
       suggestions={getRankingMatchSuggestions(currentPlayerId, opponents, availabilities)}
-      description={description ?? 'Avversari sfidabili con almeno un giorno e una fascia oraria in comune con te.'}
+      description={description ?? 'Giocatori ancora sfidabili, ordinati per numero di fasce in comune con te.'}
     />
   );
 }
@@ -122,13 +137,11 @@ export function TournamentMatchFinder({
       {...actions}
       loading={availability.loading}
       error={availability.error}
-      hasAvailability={getTournamentAvailabilitySlots(event, tournament, now).some(slot =>
-        hasTournamentSlotPreference(availability, currentPlayerId, slot)
-      )}
+      hasAvailability={hasTournamentAvailability(event, tournament, currentPlayerId, availability, now)}
       suggestions={getTournamentMatchSuggestions(event, tournament, currentPlayerId, availability, now)}
       description={padel
-        ? 'Solo squadre avversarie degli incontri ancora da giocare, con disponibilità dichiarate da tutti e quattro. Prima stesso centro, data e ora; poi stessa data e centro con orari diversi; infine stessa data con centri diversi. Le alternative richiedono un accordo.'
-        : 'Solo avversari degli incontri ancora da giocare. Prima stesso centro, data e ora; poi stessa data e centro con orari diversi; infine stessa data con centri diversi. Le alternative richiedono un accordo.'}
+        ? 'Squadre con incontri ancora da organizzare, ordinate per compatibilità. Nel Padel devono aver dichiarato la disponibilità tutti e quattro i giocatori.'
+        : 'Avversari con incontri ancora da organizzare, ordinati per compatibilità con le tue disponibilità.'}
     />
   );
 }
