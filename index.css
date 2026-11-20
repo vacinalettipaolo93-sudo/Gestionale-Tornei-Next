@@ -53,6 +53,12 @@ button { touch-action: manipulation; }
 .dialog-panel-wide { max-width: 48rem; }
 .dialog-panel button { min-height: 44px; }
 .score-input { font-variant-numeric: tabular-nums; }
+.tournament-tab-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+}
+.tournament-tab-scroll::-webkit-scrollbar { display: none; }
 .fixed.inset-0 > .bg-secondary { max-height: calc(100dvh - 32px); overflow-y: auto; min-width: 0; }
 
 /* Ensure images and videos never break out of their container */

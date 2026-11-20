@@ -25,6 +25,9 @@ import { useSectionScroll } from './useSectionScroll';
 import { saveTournamentResult } from '../services/tournamentResultService';
 import { validateMatchScores } from '../utils/tournamentResults';
 import { getCompetitorName, getTeamForPlayer, getTournamentCompetitors, getTournamentPadelTeams, isPadelEvent } from '../utils/padel';
+import TournamentTabBar from './TournamentTabBar';
+
+type TournamentTab = 'standings' | 'matches' | 'participants' | 'playoffs' | 'consolation' | 'groups' | 'settings' | 'rules' | 'players' | 'availability';
 
 interface TournamentViewProps {
   event: Event;
@@ -32,7 +35,7 @@ interface TournamentViewProps {
   setEvents: React.Dispatch<React.SetStateAction<Event[]>>;
   isOrganizer: boolean;
   loggedInPlayerId?: string;
-  initialActiveTab?: 'standings' | 'matches' | 'participants' | 'playoffs' | 'consolation' | 'groups' | 'settings' | 'rules' | 'players' | 'availability';
+  initialActiveTab?: TournamentTab;
   initialSelectedGroupId?: string;
   onPlayerContact?: (player: Player | { phone?: string }) => void;
 }
@@ -77,9 +80,7 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   );
   const selectedGroup = tournament.groups.find(g => g.id === selectedGroupId);
 
-  const [activeTab, setActiveTab] = useState<'standings' | 'matches' | 'participants' | 'playoffs' | 'consolation' | 'groups' | 'settings' | 'rules' | 'players' | 'availability'>(
-    initialActiveTab ?? 'standings'
-  );
+  const [activeTab, setActiveTab] = useState<TournamentTab>(initialActiveTab ?? 'standings');
 
   useEffect(() => {
     if (initialActiveTab) setActiveTab(initialActiveTab);
@@ -107,6 +108,20 @@ const TournamentView: React.FC<TournamentViewProps> = ({
   const [savingResult, setSavingResult] = useState(false);
   const [cancelingMatch, setCancelingMatch] = useState<Match | null>(null);
   const sectionRef = useSectionScroll(`${tournament.id}:${activeTab}:${selectedGroupId}`);
+  const tournamentTabs: Array<{ id: TournamentTab; label: string }> = [
+    { id: 'standings', label: 'Classifica' },
+    { id: 'matches', label: 'Partite' },
+    { id: 'availability', label: 'Disponibilità di gioco' },
+    ...(!isOrganizer ? [{ id: 'participants' as const, label: 'Partecipanti' }] : []),
+    { id: 'playoffs', label: 'Playoff' },
+    { id: 'consolation', label: 'Consolazione' },
+    ...(isOrganizer ? [
+      { id: 'groups' as const, label: 'Gestione Gironi' },
+      { id: 'players' as const, label: 'Giocatori' },
+    ] : []),
+    { id: 'rules', label: 'Regolamento' },
+    ...(isOrganizer ? [{ id: 'settings' as const, label: 'Impostazioni' }] : []),
+  ];
 
   const handleEditResult = (match: Match) => {
     setScore1(match.score1 == null ? '' : String(match.score1));
@@ -194,97 +209,7 @@ const TournamentView: React.FC<TournamentViewProps> = ({
 
   return (
     <div ref={sectionRef} className="min-w-0 scroll-mt-4">
-      {/* Tabs menu */}
-      <div className="flex gap-2 mb-6 flex-wrap">
-        <button onClick={() => setActiveTab('standings')}
-          className={`px-4 py-2 rounded-full ${activeTab === 'standings'
-            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-            : 'bg-transparent text-accent'
-          }`}
-        >
-          Classifica
-        </button>
-        <button onClick={() => setActiveTab('matches')}
-          className={`px-4 py-2 rounded-full ${activeTab === 'matches'
-            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-            : 'bg-transparent text-accent'
-          }`}
-        >
-          Partite
-        </button>
-        <button onClick={() => setActiveTab('availability')}
-          className={`px-4 py-2 rounded-full ${activeTab === 'availability'
-            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-            : 'bg-transparent text-accent'
-          }`}
-        >
-          Disponibilità di gioco
-        </button>
-        {!isOrganizer && (
-          <button onClick={() => setActiveTab('participants')}
-            className={`px-4 py-2 rounded-full ${activeTab === 'participants'
-              ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-              : 'bg-transparent text-accent'
-            }`}
-          >
-            Partecipanti
-          </button>
-        )}
-        <button onClick={() => setActiveTab('playoffs')}
-          className={`px-4 py-2 rounded-full ${activeTab === 'playoffs'
-            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-            : 'bg-transparent text-accent'
-          }`}
-        >
-          Playoff
-        </button>
-        <button onClick={() => setActiveTab('consolation')}
-          className={`px-4 py-2 rounded-full ${activeTab === 'consolation'
-            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-            : 'bg-transparent text-accent'
-          }`}
-        >
-          Consolazione
-        </button>
-        {isOrganizer && (
-          <>
-            <button onClick={() => setActiveTab('groups')}
-              className={`px-4 py-2 rounded-full ${activeTab === 'groups'
-                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-                : 'bg-transparent text-accent'
-              }`}
-            >
-              Gestione Gironi
-            </button>
-            <button onClick={() => setActiveTab('players')}
-              className={`px-4 py-2 rounded-full ${activeTab === 'players'
-                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-                : 'bg-transparent text-accent'
-              }`}
-            >
-              Giocatori
-            </button>
-          </>
-        )}
-        <button onClick={() => setActiveTab('rules')}
-          className={`px-4 py-2 rounded-full ${activeTab === 'rules'
-            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-            : 'bg-transparent text-accent'
-          }`}
-        >
-          Regolamento
-        </button>
-        {isOrganizer && (
-          <button onClick={() => setActiveTab('settings')}
-            className={`px-4 py-2 rounded-full ${activeTab === 'settings'
-              ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-              : 'bg-transparent text-accent'
-            }`}
-          >
-            Impostazioni
-          </button>
-        )}
-      </div>
+      <TournamentTabBar tabs={tournamentTabs} activeTab={activeTab} onSelect={setActiveTab} />
 
       {/* Selettore gironi */}
       {selectedGroup && (
