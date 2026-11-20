@@ -1,16 +1,26 @@
-/* index.css minimale */
-:root{
-  --bg: #ffffff;
-  --text: #0f172a;
-  --accent: #7c3aed;
-  --secondary: #f3f4f6;
+:root {
+  color-scheme: dark;
+  --app-bg: #0b1220;
+  --app-surface: #111d30;
+  --app-raised: #23344b;
+  --app-border: rgb(148 163 184 / 16%);
+  --app-accent: #4dd8e9;
+  --app-highlight: #8b70f4;
+  --app-text: #eef4fc;
+  --app-text-muted: #a7b5ca;
 }
-html, body, #__next { height: 100%; }
+
+html, body, #root, #__next { min-height: 100%; }
 body {
   margin: 0;
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  background: var(--secondary);
-  color: var(--text);
+  background:
+    radial-gradient(900px circle at 4% -18%, rgb(77 216 233 / 10%), transparent 58%),
+    radial-gradient(760px circle at 100% -12%, rgb(139 112 244 / 12%), transparent 55%),
+    var(--app-bg);
+  color: var(--app-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ─── Mobile/Responsive base ─────────────────────────────────────────────── */
@@ -18,15 +28,56 @@ body {
 /* Prevent the root element from ever producing horizontal scroll */
 html {
   overflow-x: clip;
-  scroll-padding-top: 1rem;
+  scroll-padding-top: 5rem;
+  scroll-behavior: smooth;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-#root { min-width: 0; }
+#root { min-width: 0; min-height: 100vh; min-height: 100dvh; }
 main, section, form, fieldset { min-width: 0; }
 input, select, textarea { max-width: 100%; }
 button, a, h1, h2, h3, h4, p { overflow-wrap: anywhere; }
-button { touch-action: manipulation; }
+button {
+  touch-action: manipulation;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+button:not(:disabled) { cursor: pointer; }
+button:active:not(:disabled) { transform: translateY(1px); }
+a { text-underline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 3px;
+}
+input, select, textarea { accent-color: var(--app-accent); }
+::selection { color: var(--app-text); background: rgb(77 216 233 / 28%); }
+
+.app-shell, .app-login-shell { background: transparent !important; }
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid var(--app-border);
+  background: rgb(11 18 32 / 82%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.app-header-inner { min-height: 4rem; }
+
+.bg-primary { background-color: var(--app-bg); }
+.bg-secondary { background-color: var(--app-surface); }
+.bg-tertiary { background-color: var(--app-raised); }
+.text-text-primary { color: var(--app-text); }
+.text-text-secondary { color: var(--app-text-muted); }
+.bg-secondary.rounded-lg,
+.bg-secondary.rounded-xl,
+.bg-secondary.rounded-2xl {
+  border: 1px solid var(--app-border);
+  box-shadow: 0 16px 42px rgb(0 0 0 / 18%);
+}
+table { border-collapse: separate; border-spacing: 0; }
+tbody tr { transition: background-color 140ms ease; }
+tbody tr:hover { background-color: rgb(148 163 184 / 5%); }
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -43,11 +94,11 @@ button { touch-action: manipulation; }
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid #334155;
+  border: 1px solid var(--app-border);
   border-radius: 1.25rem;
   padding: clamp(16px, 4vw, 24px);
-  background: #1e293b;
-  color: #e2e8f0;
+  background: var(--app-surface);
+  color: var(--app-text);
   box-shadow: 0 24px 80px rgb(0 0 0 / 0.45);
 }
 .dialog-panel-wide { max-width: 48rem; }
@@ -100,19 +151,19 @@ img, video, svg {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #22d3ee;
+  background: var(--app-accent);
   cursor: pointer;
   pointer-events: all;
-  border: 2px solid #0f172a;
-  box-shadow: 0 0 0 1px #22d3ee40;
+  border: 2px solid var(--app-bg);
+  box-shadow: 0 0 0 1px rgb(77 216 233 / 25%);
 }
 .dual-range::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #22d3ee;
+  background: var(--app-accent);
   cursor: pointer;
   pointer-events: all;
-  border: 2px solid #0f172a;
-  box-shadow: 0 0 0 1px #22d3ee40;
+  border: 2px solid var(--app-bg);
+  box-shadow: 0 0 0 1px rgb(77 216 233 / 25%);
 }
