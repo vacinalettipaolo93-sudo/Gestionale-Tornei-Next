@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { type Group, type Player, type TournamentSettings } from '../types';
 import { calculateStandings } from '../utils/standings';
+import { getStandingsRuleWarnings } from '../utils/pointRules';
 
 interface StandingsTableProps {
   group: Group;
@@ -13,11 +14,18 @@ interface StandingsTableProps {
 
 const StandingsTable: React.FC<StandingsTableProps> = ({ group, players, settings, loggedInPlayerId, onPlayerContact, entryLabel = 'Giocatore' }) => {
   const standings = useMemo(() => calculateStandings(group, players, settings), [group, players, settings]);
+  const ruleWarnings = useMemo(() => getStandingsRuleWarnings(group, settings.pointRules), [group, settings.pointRules]);
 
   const getPlayer = (playerId: string) => players.find(p => p.id === playerId);
 
   return (
-    <div className="overflow-x-auto bg-secondary rounded-xl shadow-lg">
+    <div className="bg-secondary rounded-xl shadow-lg">
+      {ruleWarnings.length > 0 && (
+        <div role="alert" className="p-4 text-yellow-400">
+          {ruleWarnings.map(warning => <p key={warning}>{warning}</p>)}
+        </div>
+      )}
+      <div className="overflow-x-auto">
       <table className="min-w-full text-sm text-left text-text-primary">
         <thead className="bg-tertiary/50 text-xs uppercase text-text-secondary">
           <tr>
@@ -58,6 +66,7 @@ const StandingsTable: React.FC<StandingsTableProps> = ({ group, players, setting
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

@@ -6,6 +6,7 @@ import { PersistenceFeedback, usePersistenceAction, useSyncedDraft } from './use
 import React, { useMemo, useState } from 'react';
 import { type Event, type PointRule, type TieBreaker, type Tournament, type TournamentSettings, ConsolationSetting, PlayoffSetting } from '../types';
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from './Icons';
+import { validatePointRules } from '../utils/pointRules';
 
 interface TournamentSettingsProps {
     event: Event;
@@ -134,6 +135,9 @@ const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tourname
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         await persistence.run(async () => {
+            const ruleError = validatePointRules(settings.pointRules);
+            if (ruleError) throw new Error(ruleError);
+            if (!Number.isSafeInteger(settings.pointsPerDraw)) throw new Error('I punti per pareggio devono essere un numero intero.');
             // persist settings into tournament.settings and save in Firestore
 
             await saveEventChanges({
@@ -157,6 +161,7 @@ const TournamentSettings: React.FC<TournamentSettingsProps> = ({ event, tourname
                 {/* Point Rules Section */}
                 <div>
                     <h4 className="text-lg font-semibold mb-3 text-text-primary">Regole Punteggio per Vittoria</h4>
+                    <p className="text-sm text-text-secondary mb-3">Queste regole valgono per tutti i gironi di questo torneo. La differenza game è il valore assoluto tra i due punteggi: per 6–7 è 1.</p>
                     <div className="space-y-3 bg-primary/50 p-4 rounded-lg">
                         {settings.pointRules.map(rule => (
                             <div key={rule.id} className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-center">

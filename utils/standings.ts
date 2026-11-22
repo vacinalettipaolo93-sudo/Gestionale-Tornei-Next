@@ -11,7 +11,9 @@ export const calculateStandings = (group: Group, players: Player[], settings: To
   });
 
   (Array.isArray(group.matches) ? group.matches : []).forEach(match => {
-    if (match.status !== 'completed' || match.score1 === null || match.score2 === null) return;
+    if (match.status !== 'completed' || typeof match.score1 !== 'number' || typeof match.score2 !== 'number'
+      || !Number.isSafeInteger(match.score1) || !Number.isSafeInteger(match.score2)
+      || match.score1 < 0 || match.score2 < 0) return;
 
     const { player1Id, player2Id, score1, score2 } = match;
     const stats1 = standingsMap[player1Id];
