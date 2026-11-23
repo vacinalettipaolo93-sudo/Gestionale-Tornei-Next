@@ -17,12 +17,61 @@ const StandingsTable: React.FC<StandingsTableProps> = ({ group, players, setting
   const getPlayer = (playerId: string) => players.find(p => p.id === playerId);
 
   return (
-    <div className="bg-secondary rounded-xl shadow-lg">
-      <p className="px-4 pt-3 text-xs text-text-secondary sm:hidden">
-        Scorri la tabella orizzontalmente per vedere tutte le statistiche.
-      </p>
-      <div role="region" aria-label="Classifica del girone" tabIndex={0} className="overflow-x-auto overscroll-x-contain">
-      <table className="w-full min-w-[680px] text-sm text-left text-text-primary">
+    <div className="overflow-hidden rounded-xl bg-secondary shadow-lg">
+      <ol aria-label="Classifica del girone" className="space-y-3 p-3 lg:hidden">
+        {standings.map((entry, index) => {
+          const player = getPlayer(entry.playerId);
+          if (!player) return null;
+          const isLoggedUser = entry.playerId === loggedInPlayerId;
+          const stats = [
+            { label: 'Giocate', value: entry.played },
+            { label: 'Vinte', value: entry.wins, color: 'text-green-400' },
+            { label: 'Pareggi', value: entry.draws, color: 'text-yellow-400' },
+            { label: 'Perse', value: entry.losses, color: 'text-red-400' },
+            { label: 'Diff. game', value: entry.goalDifference > 0 ? `+${entry.goalDifference}` : entry.goalDifference },
+            { label: 'Game fatti', value: entry.goalsFor },
+          ];
+          return (
+            <li key={entry.playerId}>
+              <article className={`rounded-xl border p-3 transition-colors ${isLoggedUser
+                ? 'border-accent/60 bg-highlight/10 shadow-md'
+                : 'border-tertiary/70 bg-primary/40'}`}>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${isLoggedUser
+                    ? 'bg-accent text-primary'
+                    : 'bg-tertiary text-text-secondary'}`}>
+                    {index + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onPlayerContact(player)}
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left transition-colors hover:text-accent"
+                  >
+                    <img src={player.avatar} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover"/>
+                    <span className={`min-w-0 whitespace-normal break-words text-sm font-semibold leading-snug ${isLoggedUser ? 'text-text-primary' : ''}`}>
+                      {player.name}
+                    </span>
+                  </button>
+                  <div className="min-w-14 shrink-0 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1 text-center">
+                    <span className="block text-[10px] font-bold uppercase tracking-wide text-text-secondary">PT</span>
+                    <strong className="block text-xl leading-none text-accent">{entry.points}</strong>
+                  </div>
+                </div>
+                <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-tertiary/50 pt-3">
+                  {stats.map(stat => (
+                    <div key={stat.label} className="rounded-lg bg-secondary/70 px-2 py-2 text-center">
+                      <dt className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-text-secondary">{stat.label}</dt>
+                      <dd className={`mt-1 text-sm font-bold ${stat.color ?? 'text-text-primary'}`}>{stat.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
+            </li>
+          );
+        })}
+      </ol>
+      <div role="region" aria-label="Tabella classifica del girone" tabIndex={0} className="hidden overflow-x-auto overscroll-x-contain lg:block">
+      <table className="w-full min-w-[760px] text-sm text-left text-text-primary">
         <thead className="bg-tertiary/50 text-xs uppercase text-text-secondary">
           <tr>
             <th scope="col" className="w-12 px-3 py-3">#</th>

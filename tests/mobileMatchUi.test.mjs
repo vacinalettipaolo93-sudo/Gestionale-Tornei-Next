@@ -115,18 +115,29 @@ test('tournament tabs stay in one swipeable row with a clearly selected section'
   assert.equal((nav.match(/whitespace-nowrap/g) ?? []).length, tabs.length);
 });
 
-test('standings table scrolls horizontally on mobile and keeps long player names separate from stats', () => {
+test('mobile standings show readable player cards while larger screens retain the complete table', () => {
   const html = renderToStaticMarkup(React.createElement(StandingsTable, {
-    group: { id: 'g', name: 'Girone', playerIds: ['a'], matches: [] },
+    group: {
+      id: 'g', name: 'Girone', playerIds: ['a', 'b'],
+      matches: [{ id: 'm', player1Id: 'a', player2Id: 'b', score1: 6, score2: 4, status: 'completed' }],
+    },
     players: [{ id: 'a', name: 'Michele Bonomini', avatar: 'avatar.png' }],
-    settings: { pointRules: [], pointsPerDraw: 1, tieBreakers: [], playoffSettings: [], consolationSettings: [], hasBronzeFinal: false },
+    settings: {
+      pointRules: [{ id: 'r', minDiff: 1, maxDiff: 99, winnerPoints: 3, loserPoints: 0 }],
+      pointsPerDraw: 1, tieBreakers: [], playoffSettings: [], consolationSettings: [], hasBronzeFinal: false,
+    },
     onPlayerContact() {},
   }));
-  assert.match(html, /aria-label="Classifica del girone"[^>]*tabindex="0"[^>]*class="overflow-x-auto overscroll-x-contain"/);
-  assert.match(html, /min-w-\[680px\]/);
-  assert.match(html, /min-w-56[^"]*whitespace-nowrap/);
-  assert.match(html, /Scorri la tabella orizzontalmente per vedere tutte le statistiche/);
-  assert.ok(html.indexOf('Michele Bonomini') < html.indexOf('>0</td>'));
+  const mobileCards = html.match(/<ol aria-label="Classifica del girone"[\s\S]*?<\/ol>/)?.[0];
+  assert.ok(mobileCards);
+  assert.match(mobileCards, /lg:hidden/);
+  assert.match(mobileCards, /Michele Bonomini/);
+  assert.match(mobileCards, /<span[^>]*>PT<\/span><strong[^>]*>3<\/strong>/);
+  for (const label of ['Giocate', 'Vinte', 'Pareggi', 'Perse', 'Diff. game', 'Game fatti']) {
+    assert.ok(mobileCards.includes(label));
+  }
+  assert.match(html, /aria-label="Tabella classifica del girone"[^>]*class="hidden overflow-x-auto overscroll-x-contain lg:block"/);
+  assert.match(html, /min-w-\[760px\]/);
 });
 
 test('match finder lists players by number of shared periods without exposing their availability details', () => {
