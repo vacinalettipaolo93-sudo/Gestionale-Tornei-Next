@@ -36,6 +36,12 @@ const StandingsTable: React.FC<StandingsTableProps> = ({ group, players, setting
               <article className={`rounded-xl border p-3 transition-colors ${isLoggedUser
                 ? 'border-accent/60 bg-highlight/10 shadow-md'
                 : 'border-tertiary/70 bg-primary/40'}`}>
+                {isLoggedUser && (
+                  <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-accent">
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                    La tua posizione
+                  </p>
+                )}
                 <div className="flex min-w-0 items-center gap-2">
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${isLoggedUser
                     ? 'bg-accent text-primary'
@@ -91,12 +97,13 @@ const StandingsTable: React.FC<StandingsTableProps> = ({ group, players, setting
             if (!player) return null;
             const isLoggedUser = entry.playerId === loggedInPlayerId;
             return (
-              <tr key={entry.playerId} className={`border-b border-tertiary/50 transition-colors ${isLoggedUser ? 'bg-highlight/10' : 'hover:bg-tertiary/20'}`}>
+              <tr key={entry.playerId} aria-current={isLoggedUser ? 'true' : undefined} className={`border-b border-tertiary/50 transition-colors ${isLoggedUser ? 'bg-highlight/10' : 'hover:bg-tertiary/20'}`}>
                 <td className={`px-3 py-3 font-medium ${isLoggedUser ? 'text-accent' : ''} ${isLoggedUser ? 'border-l-4 border-accent' : ''}`}>{index + 1}</td>
                 <th scope="row" className="min-w-56 px-3 py-3 font-medium whitespace-nowrap">
                   <button onClick={() => onPlayerContact(player)} className="flex items-center gap-3 text-left hover:text-accent transition-colors">
                     <img src={player.avatar} alt={player.name} className="w-8 h-8 rounded-full object-cover"/>
                     <span className={`whitespace-nowrap ${isLoggedUser ? 'text-text-primary' : ''}`}>{player.name}</span>
+                    {isLoggedUser && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">Tu</span>}
                   </button>
                 </th>
                 <td className={`px-2 py-3 text-center font-bold ${isLoggedUser ? 'text-text-primary' : ''}`}>{entry.points}</td>

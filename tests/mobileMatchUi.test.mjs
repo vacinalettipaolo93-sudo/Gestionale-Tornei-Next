@@ -126,6 +126,7 @@ test('mobile standings show readable player cards while larger screens retain th
       pointRules: [{ id: 'r', minDiff: 1, maxDiff: 99, winnerPoints: 3, loserPoints: 0 }],
       pointsPerDraw: 1, tieBreakers: [], playoffSettings: [], consolationSettings: [], hasBronzeFinal: false,
     },
+    loggedInPlayerId: 'a',
     onPlayerContact() {},
   }));
   const mobileCards = html.match(/<ol aria-label="Classifica del girone"[\s\S]*?<\/ol>/)?.[0];
@@ -133,11 +134,14 @@ test('mobile standings show readable player cards while larger screens retain th
   assert.match(mobileCards, /lg:hidden/);
   assert.match(mobileCards, /Michele Bonomini/);
   assert.match(mobileCards, /<span[^>]*>PT<\/span><strong[^>]*>3<\/strong>/);
+  assert.match(mobileCards, /La tua posizione/);
   for (const label of ['Giocate', 'Vinte', 'Pareggi', 'Perse', 'Diff. game', 'Game fatti']) {
     assert.ok(mobileCards.includes(label));
   }
   assert.match(html, /aria-label="Tabella classifica del girone"[^>]*class="hidden overflow-x-auto overscroll-x-contain lg:block"/);
   assert.match(html, /min-w-\[760px\]/);
+  assert.match(html, /aria-current="true"/);
+  assert.match(html, />Tu<\/span>/);
 });
 
 test('match finder lists players by number of shared periods without exposing their availability details', () => {
