@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const temporary = mkdtempSync(path.join(os.tmpdir(), 'mobile-match-ui-'));
 after(() => rmSync(temporary, { recursive: true }));
 await build({
-  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx', 'components/MatchFinder.tsx'], bundle: true, platform: 'node',
+  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx', 'components/MatchFinder.tsx', 'components/StandingsTable.tsx'], bundle: true, platform: 'node',
   format: 'esm', outdir: temporary, outExtension: { '.js': '.mjs' },
   plugins: [{
     name: 'render-dependencies',
@@ -43,6 +43,7 @@ const PadelIndividualRankingView = await load('PadelIndividualRankingView');
 const GroupManagement = await load('GroupManagement');
 const TournamentTabBar = await load('TournamentTabBar');
 const { RankingMatchFinder } = await loadModule('MatchFinder');
+const StandingsTable = await load('StandingsTable');
 const players = ['a', 'b', 'c', 'd'].map(id => ({ id, name: `Player ${id}`, status: 'confirmed', avatar: 'avatar.png', phone: '' }));
 const match = (id, p1 = 'a', p2 = 'b', overrides = {}) => ({
   id, player1Id: p1, player2Id: p2, score1: null, score2: null, status: 'pending', ...overrides,
@@ -112,6 +113,35 @@ test('tournament tabs stay in one swipeable row with a clearly selected section'
   for (const tab of tabs) assert.ok(nav.includes(tab.label));
   assert.match(nav, /aria-current="page"[^>]*>Disponibilità di gioco<\/button>/);
   assert.equal((nav.match(/whitespace-nowrap/g) ?? []).length, tabs.length);
+});
+
+test('mobile standings show readable player cards while larger screens retain the complete table', () => {
+  const html = renderToStaticMarkup(React.createElement(StandingsTable, {
+    group: {
+      id: 'g', name: 'Girone', playerIds: ['a', 'b'],
+      matches: [{ id: 'm', player1Id: 'a', player2Id: 'b', score1: 6, score2: 4, status: 'completed' }],
+    },
+    players: [{ id: 'a', name: 'Michele Bonomini', avatar: 'avatar.png' }],
+    settings: {
+      pointRules: [{ id: 'r', minDiff: 1, maxDiff: 99, winnerPoints: 3, loserPoints: 0 }],
+      pointsPerDraw: 1, tieBreakers: [], playoffSettings: [], consolationSettings: [], hasBronzeFinal: false,
+    },
+    loggedInPlayerId: 'a',
+    onPlayerContact() {},
+  }));
+  const mobileCards = html.match(/<ol aria-label="Classifica del girone"[\s\S]*?<\/ol>/)?.[0];
+  assert.ok(mobileCards);
+  assert.match(mobileCards, /lg:hidden/);
+  assert.match(mobileCards, /Michele Bonomini/);
+  assert.match(mobileCards, /<span[^>]*>PT<\/span><strong[^>]*>3<\/strong>/);
+  assert.match(mobileCards, /La tua posizione/);
+  for (const label of ['Giocate', 'Vinte', 'Pareggi', 'Perse', 'Diff. game', 'Game fatti']) {
+    assert.ok(mobileCards.includes(label));
+  }
+  assert.match(html, /aria-label="Tabella classifica del girone"[^>]*class="hidden overflow-x-auto overscroll-x-contain lg:block"/);
+  assert.match(html, /min-w-\[760px\]/);
+  assert.match(html, /aria-current="true"/);
+  assert.match(html, />Tu<\/span>/);
 });
 
 test('match finder lists players by number of shared periods without exposing their availability details', () => {
