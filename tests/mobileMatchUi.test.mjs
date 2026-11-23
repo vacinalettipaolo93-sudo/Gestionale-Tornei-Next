@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const temporary = mkdtempSync(path.join(os.tmpdir(), 'mobile-match-ui-'));
 after(() => rmSync(temporary, { recursive: true }));
 await build({
-  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx', 'components/MatchFinder.tsx'], bundle: true, platform: 'node',
+  entryPoints: ['components/MatchList.tsx', 'components/PadelIndividualRankingView.tsx', 'components/GroupManagement.tsx', 'components/TournamentTabBar.tsx', 'components/MatchFinder.tsx', 'components/StandingsTable.tsx'], bundle: true, platform: 'node',
   format: 'esm', outdir: temporary, outExtension: { '.js': '.mjs' },
   plugins: [{
     name: 'render-dependencies',
@@ -43,6 +43,7 @@ const PadelIndividualRankingView = await load('PadelIndividualRankingView');
 const GroupManagement = await load('GroupManagement');
 const TournamentTabBar = await load('TournamentTabBar');
 const { RankingMatchFinder } = await loadModule('MatchFinder');
+const StandingsTable = await load('StandingsTable');
 const players = ['a', 'b', 'c', 'd'].map(id => ({ id, name: `Player ${id}`, status: 'confirmed', avatar: 'avatar.png', phone: '' }));
 const match = (id, p1 = 'a', p2 = 'b', overrides = {}) => ({
   id, player1Id: p1, player2Id: p2, score1: null, score2: null, status: 'pending', ...overrides,
@@ -112,6 +113,20 @@ test('tournament tabs stay in one swipeable row with a clearly selected section'
   for (const tab of tabs) assert.ok(nav.includes(tab.label));
   assert.match(nav, /aria-current="page"[^>]*>Disponibilità di gioco<\/button>/);
   assert.equal((nav.match(/whitespace-nowrap/g) ?? []).length, tabs.length);
+});
+
+test('standings table scrolls horizontally on mobile and keeps long player names separate from stats', () => {
+  const html = renderToStaticMarkup(React.createElement(StandingsTable, {
+    group: { id: 'g', name: 'Girone', playerIds: ['a'], matches: [] },
+    players: [{ id: 'a', name: 'Michele Bonomini', avatar: 'avatar.png' }],
+    settings: { pointRules: [], pointsPerDraw: 1, tieBreakers: [], playoffSettings: [], consolationSettings: [], hasBronzeFinal: false },
+    onPlayerContact() {},
+  }));
+  assert.match(html, /aria-label="Classifica del girone"[^>]*tabindex="0"[^>]*class="overflow-x-auto overscroll-x-contain"/);
+  assert.match(html, /min-w-\[680px\]/);
+  assert.match(html, /min-w-56[^"]*whitespace-nowrap/);
+  assert.match(html, /Scorri la tabella orizzontalmente per vedere tutte le statistiche/);
+  assert.ok(html.indexOf('Michele Bonomini') < html.indexOf('>0</td>'));
 });
 
 test('match finder lists players by number of shared periods without exposing their availability details', () => {
